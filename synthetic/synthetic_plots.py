@@ -150,7 +150,7 @@ for i in range(num_init):
     R2_CPICs_obs.append(R2_metrics)
     loss_CPICs_obs.append(losses)
 R2_CPICs_obs = np.stack(R2_CPICs_obs)[:,:,-1]
-loss_CPICs_obs = np.stack(loss_CPIC_obs)
+loss_CPICs_obs = np.stack(loss_CPICs_obs)
 
 R2_CPICs_obs_mean = np.mean(R2_CPICs_obs, axis=0)
 R2_CPICs_obs_std = np.std(R2_CPICs_obs, axis=0)

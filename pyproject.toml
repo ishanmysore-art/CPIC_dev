@@ -1,0 +1,34 @@
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]  # [CHANGE] upgraded setuptools to 61+ for full pyproject.toml metadata support
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "CPIC"
+version = "1.1.0"
+description = "Compressed Predictive Information Coding"
+readme = "README.md"
+requires-python = ">=3.6"
+authors = [
+    { name = "Kailin Zhuang", email = "kailin.zhuang@berkeley.edu" },
+    { name = "Phoenix Pham", email = "phoenixpham@berkeley.edu" },
+    { name = "Aditya Anantaraman", email = "aditya.anant@berkeley.edu"}
+]
+license = { file = "LICENSE.txt" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent"
+]
+dynamic = ["dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/BouchardLab/CPIC_dev"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
