@@ -10,6 +10,9 @@ description = "Compressed Predictive Information Coding"
 readme = "README.md"
 requires-python = ">=3.6"
 authors = [
+    { name = "Rui Meng", email = "rmeng1@ucsc.edu" }
+]
+maintainers = [
     { name = "Kailin Zhuang", email = "kailin.zhuang@berkeley.edu" },
     { name = "Phoenix Pham", email = "phoenixpham@berkeley.edu" },
     { name = "Aditya Anantaraman", email = "aditya.anant@berkeley.edu"}
