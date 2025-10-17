@@ -2,4 +2,4 @@ __pycache__
 *.hdf5
 *.pkl
 tensor_logs/*
-.idea/
+.idea/*
