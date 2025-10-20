@@ -8,6 +8,7 @@ from dca import DynamicalComponentsAnalysis as DCA
 from utils.plotting import style
 import pickle
 import argparse
+import os
 
 
 def gen_lorenz_system(T, integration_dt=0.005):
@@ -153,6 +154,8 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
     """
     np.random.seed(random_seed)
     # Save params
+    os.makedirs(os.path.dirname(RESULTS_FILENAME), exist_ok=True)
+
     with h5py.File(RESULTS_FILENAME, "w") as f:
         f.attrs["T"] = T
         f.attrs["N"] = N
@@ -245,7 +248,7 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='synthetic data generation.')
     parser.add_argument('--seed', type=int, default=22) # original seed = 42
-    parser.add_argument('--RESULTS_FILENAME', type=str, default="../data/lorenz/lorenz_exploration.hdf5", help="the files can be "
+    parser.add_argument('--RESULTS_FILENAME', type=str, default="./data/lorenz/lorenz_exploration.hdf5", help="the files can be "
                                                                                                                "../data/lorenz/lorenz_exploration.hdf5 or ../data/lorenz/lorenz_results.hdf5")
     args = parser.parse_args()
     seed = args.seed
@@ -257,9 +260,9 @@ if __name__ == "__main__":
     T = 4
     N = 30
     noise_dim = 5
-    if RESULTS_FILENAME == "../data/lorenz/lorenz_results.hdf5":
+    if RESULTS_FILENAME == "./data/lorenz/lorenz_results.hdf5":
         snr_vals = np.array([0.01, 0.02, 0.05, 0.1, 1])
-    if RESULTS_FILENAME == "../data/lorenz/lorenz_exploration.hdf5":
+    if RESULTS_FILENAME == "./data/lorenz/lorenz_exploration.hdf5":
         snr_vals = np.logspace(-3.0, -1.0, num=10)
 
     # generate data

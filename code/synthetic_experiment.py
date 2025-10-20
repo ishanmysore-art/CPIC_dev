@@ -122,7 +122,7 @@ if __name__ == "__main__":
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
     saved_root = cfg.get('User', 'saved_root')
     if not os.path.exists(saved_root):
-        os.mkdir(saved_root)
+        os.makedirs(saved_root)
 
     # set hyper-parameters
     beta = cfg.getfloat('Hyperparameters', 'beta')
