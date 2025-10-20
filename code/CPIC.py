@@ -4,7 +4,7 @@ import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
-from dca import DynamicalComponentsAnalysis as DCA
+import dca as DCA
 
 
 def KL_between_normals(q_distr, p_distr):
@@ -39,9 +39,18 @@ def mlp(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
 
 
 def conv_encoder(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
-    """
-    1D Convolutional encoder for time series data.
-    """
+    '''
+    1D convolutional encoder
+    input_dim: input dim (num features)
+    hidden_dim: hidden dim
+    output_dim: output dim
+    n_layers: number of layers
+    activation: activation function (relu by default)
+    T: time window
+    kernel_size: conv kernel size
+    stride: conv stride
+    padding: conv padding
+    '''
     if activation == 'relu':
         activation_f = nn.ReLU()
     
@@ -128,7 +137,8 @@ class UnnormalizedBaseline(nn.Module):
 
 
 class StructuredEncoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, T=4, n_layers=1, activation='relu', deterministic=False, device="cuda:0", linear_encoding=True, encoder_type='mlp'):
+    def __init__(self, input_dim, hidden_dim, output_dim, T=4, n_layers=1, activation='relu', deterministic=False, device="cuda:0", linear_encoding=True, 
+                encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1):
         super(StructuredEncoder, self).__init__()
         self.deterministic = deterministic
         self.encoder_type = encoder_type
@@ -139,7 +149,8 @@ class StructuredEncoder(nn.Module):
             if encoder_type == 'mlp':
                 self._mean = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=None)
             elif encoder_type == 'conv':
-                self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None)
+                self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None, 
+                            kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
                 raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
                 
@@ -149,7 +160,8 @@ class StructuredEncoder(nn.Module):
             if encoder_type == 'mlp':
                 self._logvars = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=T)
             elif encoder_type == 'conv':
-                self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T)
+                self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T, 
+                                kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
                 raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
 
@@ -329,7 +341,7 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
 class CPIC(nn.Module):
     def __init__(self, xdim, ydim, mi_params, critic_params, baseline_params, T=4, beta=1e-3, beta1=1, beta2=1, hidden_dim=256,
                  deterministic=False, linear_encoding=True, init_weights=None, device='cuda:0', critic_params_YX=None, predictive_space="latent",
-                 regularization_weight=0, encoder_type='mlp'):
+                 regularization_weight=0, encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1):
         super(CPIC, self).__init__()
 
         self.predictive_space = predictive_space
@@ -341,7 +353,8 @@ class CPIC(nn.Module):
         self.T = T
         self.deterministic = deterministic
         self.linear_encoding = linear_encoding
-        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, T=self.T, deterministic=deterministic, device=device, linear_encoding=linear_encoding, encoder_type=encoder_type)
+        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, T=self.T, deterministic=deterministic, device=device, linear_encoding=linear_encoding, 
+                                        encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, conv_padding=conv_padding)
         self.encoder.to(device)
         # initialize critic and baseline for I_compress, I_predictive
         if init_weights is not None:
@@ -416,7 +429,7 @@ class CPIC(nn.Module):
 
 
 def DCA_init(X, T, d, n_init=1, rng_or_seed=None):
-    opt = DCA(T=T, rng_or_seed=rng_or_seed)
+    opt = DCA.DynamicalComponentsAnalysis(T=T, rng_or_seed=rng_or_seed)
     opt.estimate_data_statistics(X)
     opt.fit_projection(d=d, n_init=n_init)
     V_dca = opt.coef_
@@ -425,10 +438,12 @@ def DCA_init(X, T, d, n_init=1, rng_or_seed=None):
 
 def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_loader, T=4, signiture=22,
                deterministic=False, linear_encoding=True, init_weights=None, num_early_stop=0, device="cuda:0", lr=1e-4, beta1=1, beta2=0,
-               critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False, encoder_type='mlp'):
+               critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False, encoder_type='mlp',
+               conv_kernel_size=3, conv_stride=1, conv_padding=1):
     model = CPIC(xdim, ydim, mi_params, critic_params, baseline_params, T=T, beta=beta, beta1=beta1, beta2=beta2,
                  deterministic=deterministic, linear_encoding=linear_encoding, init_weights=init_weights, device=device, critic_params_YX=critic_params_YX,
-                 predictive_space=predictive_space, regularization_weight=regularization_weight, encoder_type=encoder_type)
+                 predictive_space=predictive_space, regularization_weight=regularization_weight, encoder_type=encoder_type,
+                 conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, conv_padding=conv_padding)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     if init_weights is not None:
         do_init = True
