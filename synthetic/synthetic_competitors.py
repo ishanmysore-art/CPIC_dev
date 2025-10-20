@@ -1,5 +1,5 @@
 import h5py
-from utils.metrics import compute_R2
+from utils.data_util import compute_R2
 from dca import DynamicalComponentsAnalysis as DCA
 import numpy as np
 import scipy
