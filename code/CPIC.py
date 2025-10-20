@@ -169,10 +169,7 @@ class StructuredEncoder(nn.Module):
         # handle input shape for conv vs mlp
         if self.encoder_type == 'conv' and not self.linear_encoding:
             # for conv, input should be (batch, features, time)
-            if len(x.shape) == 3:  # (batch, time, features)
-                x_processed = x.transpose(1, 2)  # (batch, features, time)
-            else:  # need to add time dim
-                x_processed = x.unsqueeze(-1)  # (batch, features, 1)
+            x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear encoding, no shape transformation needed
             x_processed = x
@@ -188,10 +185,7 @@ class StructuredEncoder(nn.Module):
     def get_logvars(self, x):
         # handle input shape for conv vs mlp
         if self.encoder_type == 'conv' and not self.linear_encoding:
-            if len(x.shape) == 3:  # (batch, time, features)
-                x_processed = x.transpose(1, 2)  # (batch, features, time)
-            else:  # need to add time dim
-                x_processed = x.unsqueeze(-1)  # (batch, features, 1)
+            x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear, no shape transformation needed
             x_processed = x
@@ -200,15 +194,17 @@ class StructuredEncoder(nn.Module):
     def get_mean(self, x):
         # handle input shape for conv vs mlp
         if self.encoder_type == 'conv' and not self.linear_encoding:
-            if len(x.shape) == 3:  # (batch, time, features)
-                x_processed = x.transpose(1, 2)  # (batch, features, time)
-            else:  # (batch, features) - need to add time dim
-                x_processed = x.unsqueeze(-1)  # (batch, features, 1)
+            x_processed = self.reshape_for_conv(x)
         else:
-            # For mlp or linear, no shape transformation needed
             x_processed = x
         return self._mean(x_processed)
 
+    def reshape_for_conv(self, x):
+        if len(x.shape) == 3:  # (batch, time, features)
+            x_processed = x.transpose(1, 2)  # (batch, features, time)
+        else:  # (batch, features) - need to add time dim
+            x_processed = x.unsqueeze(-1)  # (batch, features, 1)
+        return x_processed
 
 def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):
         """

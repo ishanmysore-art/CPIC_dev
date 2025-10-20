@@ -256,10 +256,10 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
     for ax in [ax_top, ax_bottom]:
         ax.fill_between(t_low_vals, y_low, y_high, alpha=1.0, color=past_color, linewidth=0)
         ax.fill_between(t_high_vals, y_low, y_high, alpha=1.0, color=future_color, linewidth=0)
-        ax.text((t_low + t_mid) / 2., y_high * 1.4, "$X_{\mathrm{past}}$", color="black",
+        ax.text((t_low + t_mid) / 2., y_high * 1.4, r"$X_{\mathrm{past}}$", color="black",
                 horizontalalignment='center', verticalalignment='top',
                 fontsize=style.axis_label_fontsize * 0.75)
-        ax.text((t_mid + t_high) / 2., y_high * 1.4, "$X_{\mathrm{future}}$", color="black",
+        ax.text((t_mid + t_high) / 2., y_high * 1.4, r"$X_{\mathrm{future}}$", color="black",
                 horizontalalignment='center', verticalalignment='top',
                 fontsize=style.axis_label_fontsize * 0.75)
     # Add T labels
@@ -541,7 +541,7 @@ def plot_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=0, min_ma
         ax.set_xlabel(r"T ({} {} bins)".format(timestep, timestep_units),
                       fontsize=style.axis_label_fontsize, labelpad=0)
     if ylabel:
-        ax.set_ylabel('$\Delta R^2$ improvement\nover SFA',
+        ax.set_ylabel(r"$\Delta R^2$ improvement\nover SFA",
                       fontsize=style.axis_label_fontsize, labelpad=-8)
 
 
@@ -729,7 +729,7 @@ def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
     ax.axhline(0, linestyle="-", linewidth=linewidth, color="black", zorder=0)
     ax.yaxis.set_tick_params(pad=1)
     ax.set_ylabel("autocorrelation", fontsize=style.axis_label_fontsize, labelpad=1)
-    ax.set_xlabel("$\Delta t$ (100 ms bins)", fontsize=style.axis_label_fontsize, labelpad=1)
+    ax.set_xlabel(r"$\Delta t$ (100 ms bins)", fontsize=style.axis_label_fontsize, labelpad=1)
 
     # inset tick labels
     xticks = [0, 1, 2]
