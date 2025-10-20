@@ -91,29 +91,29 @@ if __name__ == "__main__":
     parser.add_argument('--device', type=str, default=None)
     args = parser.parse_args()
     if args.config == 'lorenz_deterministic_infonce':
-        config_file = 'config/config_lorenz_deterministic_infonce.ini'
+        config_file = './config/config_lorenz_deterministic_infonce.ini'
     elif args.config == 'lorenz_deterministic_nwj':
-        config_file = 'config/config_lorenz_deterministic_nwj.ini'
+        config_file = './config/config_lorenz_deterministic_nwj.ini'
     elif args.config == 'lorenz_deterministic_mine':
-        config_file = 'config/config_lorenz_deterministic_mine.ini'
+        config_file = './config/config_lorenz_deterministic_mine.ini'
     elif args.config == 'lorenz_deterministic_tuba':
-        config_file = 'config/config_lorenz_deterministic_tuba.ini'
+        config_file = './config/config_lorenz_deterministic_tuba.ini'
     elif args.config == 'lorenz_stochastic_infonce':
-        config_file = 'config/config_lorenz_stochastic_infonce.ini'
+        config_file = './config/config_lorenz_stochastic_infonce.ini'
     elif args.config == 'lorenz_stochastic_nwj':
-        config_file = 'config/config_lorenz_stochastic_nwj.ini'
+        config_file = './config/config_lorenz_stochastic_nwj.ini'
     elif args.config == 'lorenz_stochastic_mine':
-        config_file = 'config/config_lorenz_stochastic_mine.ini'
+        config_file = './config/config_lorenz_stochastic_mine.ini'
     elif args.config == 'lorenz_stochastic_tuba':
-        config_file = 'config/config_lorenz_stochastic_tuba.ini'
+        config_file = './config/config_lorenz_stochastic_tuba.ini'
     elif args.config == 'lorenz_deterministic_infonce_exploration':
-        config_file = 'config/config_lorenz_deterministic_infonce_exploration.ini'
+        config_file = './config/config_lorenz_deterministic_infonce_exploration.ini'
     elif args.config == 'lorenz_deterministic_infonce_obs_exploration':
-        config_file = 'config/config_lorenz_deterministic_infonce_obs_exploration.ini'
+        config_file = './config/config_lorenz_deterministic_infonce_obs_exploration.ini'
     elif args.config == 'lorenz_stochastic_infonce_exploration':
-        config_file = 'config/config_lorenz_stochastic_infonce_exploration.ini'
+        config_file = './config/config_lorenz_stochastic_infonce_exploration.ini'
     elif args.config == 'lorenz_stochastic_infonce_obs_exploration':
-        config_file = 'config/config_lorenz_stochastic_infonce_obs_exploration.ini'
+        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration.ini'
     else:
         raise ValueError("{} has not been implemented!".format(args.config))
 
