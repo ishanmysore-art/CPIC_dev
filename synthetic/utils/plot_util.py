@@ -6,7 +6,7 @@ from matplotlib import patches
 from matplotlib.patches import Ellipse
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-# from style.py
+# from py
 ticklabel_fontsize = 6
 axis_label_fontsize = 20
 title_fontsize = 10
@@ -122,22 +122,22 @@ def lorenz_fig_axes(fig_width=12, left_ax_width=0.1, left_ax_wpad=0.05, wpad_edg
 
     # Add letter labels
     fig.text(wpad_edge, 1 - hpad_top, "A",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad, 1 - hpad_top, "B",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + sq_width + wpad_mid, 1 - hpad_top, "C",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + 2 * sq_width + 2 * wpad_mid,
              1 - hpad_top, "D",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
              1 - hpad_top, "E",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + 0.035, hpad_bottom + sq_height, "F",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
     fig.text(wpad_edge + left_ax_width + left_ax_wpad + 3 * sq_width + 3 * wpad_mid,
              hpad_bottom + sq_height, "G",
-             va="bottom", ha="center", color="black", **style.panel_letter_fontstyle)
+             va="bottom", ha="center", color="black", **panel_letter_fontstyle)
 
     axes = [left_ax_1, left_ax_2, left_ax_3, ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9, ax10,
             ax11, ax12]
@@ -169,7 +169,7 @@ def plot_3d_colored(rf_coefficients_2norm, X, color="black", linewidth=2, ax=Non
 
 
 def plot_lorenz_3d(ax, X, linewidth):
-    ax_label_fontsize = style.axis_label_fontsize
+    ax_label_fontsize = axis_label_fontsize
     plot_3d(X, ax=ax, linewidth=linewidth)
     ax.xaxis.set_pane_color((1, 1, 1, 0))
     ax.yaxis.set_pane_color((1, 1, 1, 0))
@@ -188,7 +188,7 @@ def plot_lorenz_3d_colored(ax, X, X_true, linewidth, max_2norm=1):
 
     rf_coefficients_2norm = LA.norm(mat_minus, axis=1)
 
-    ax_label_fontsize = style.axis_label_fontsize
+    ax_label_fontsize = axis_label_fontsize
     p = plot_3d_colored(rf_coefficients_2norm, X, ax=ax, linewidth=linewidth, max_2norm=max_2norm, verbose=False)
     # ax.xaxis.set_pane_color((1, 1, 1, 0))
     # ax.yaxis.set_pane_color((1, 1, 1, 0))
@@ -221,7 +221,7 @@ def plot_traces(ax, X, N_to_show, linewidth):
     ax.set_xticks([])
     ax.set_yticks(offset_vals)
     ax.set_yticklabels(list(np.arange(N_to_show) + 1) + [X.shape[1]],
-                       fontsize=style.ticklabel_fontsize)
+                       fontsize=ticklabel_fontsize)
     ax.text(np.mean(t), y_jump * 0.55,
             "···", rotation=90, fontsize=10, color="black",
             horizontalalignment="center", verticalalignment="center",
@@ -266,17 +266,17 @@ def plot_dca_demo(ax_top, ax_bottom, X_random_trans, X_dca_trans, past_color, fu
                 fontsize=style.axis_label_fontsize * 0.75)
         ax.text((t_mid + t_high) / 2., y_high * 1.4, r"$X_{\mathrm{future}}$", color="black",
                 horizontalalignment='center', verticalalignment='top',
-                fontsize=style.axis_label_fontsize * 0.75)
+                fontsize=axis_label_fontsize * 0.75)
     # Add T labels
     ax_bottom.text((t_low + t_mid) / 2, -y_spacing * 1.2, "$T$", color="black",
                    horizontalalignment='center', verticalalignment='top',
-                   fontsize=style.axis_label_fontsize)
+                   fontsize=axis_label_fontsize)
     ax_bottom.text((t_mid + t_high) / 2, -y_spacing * 1.2, "$T$", color="black",
                    horizontalalignment='center', verticalalignment='top',
-                   fontsize=style.axis_label_fontsize)
+                   fontsize=axis_label_fontsize)
 
-    ax_top.set_ylabel("random", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
-    ax_bottom.set_ylabel("DCA", fontsize=style.axis_label_fontsize * 0.8, labelpad=1)
+    ax_top.set_ylabel("random", fontsize=axis_label_fontsize * 0.8, labelpad=1)
+    ax_bottom.set_ylabel("DCA", fontsize=axis_label_fontsize * 0.8, labelpad=1)
 
 
 def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color):
@@ -287,16 +287,16 @@ def plot_r2(ax, snr_vals, plt_snr_vals, r2_vals, dca_color, pca_color):
     ax.set_xscale("log")
     for snr in plt_snr_vals:
         ax.axvline(snr, ymin=-0.025, ymax=1, c="black", linestyle='--', linewidth=0.7, zorder=0)
-    ax.set_xlabel("SNR", fontsize=style.axis_label_fontsize)
-    ax.set_ylabel("$R^2$", fontsize=style.axis_label_fontsize, labelpad=0)
+    ax.set_xlabel("SNR", fontsize=axis_label_fontsize)
+    ax.set_ylabel("$R^2$", fontsize=axis_label_fontsize, labelpad=0)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_bounds(-0.025, 1)
     ax.set_ylim([-0.025, 1.025])
     ax.set_yticks([0, 0.5, 1])
-    ax.set_yticklabels(["0.0", "0.5", "1.0"], size=style.ticklabel_fontsize)
+    ax.set_yticklabels(["0.0", "0.5", "1.0"], size=ticklabel_fontsize)
     ax.set_xticks([0.1, 1, 10])
-    ax.set_xticklabels(["$10^{-1}$", "$10^0$", "$10^1$"], size=style.ticklabel_fontsize)
+    ax.set_xticklabels(["$10^{-1}$", "$10^0$", "$10^1$"], size=ticklabel_fontsize)
     ax.set_zorder(10**5)
 
 
@@ -440,15 +440,15 @@ def scatter_r2_vals(r2_vals, T_pi_idx, dim_vals, offset_vals, T_pi_vals,
 
     # set ticks
     ax.set_xticks([min_val, max_val])
-    ax.set_xticklabels([min_val, max_val], fontsize=style.ticklabel_fontsize)
+    ax.set_xticklabels([min_val, max_val], fontsize=ticklabel_fontsize)
     ax.set_yticks([min_val, max_val])
-    ax.set_yticklabels([min_val, max_val], fontsize=style.ticklabel_fontsize)
+    ax.set_yticklabels([min_val, max_val], fontsize=ticklabel_fontsize)
 
     # plot diagonal line
     t = [min_val, max_val]
     ax.plot(t, t, c="black", linestyle="--", zorder=0, linewidth=1.)
     ax.text(.05, .9, 'T = {} bins'.format(T_pi_vals[T_pi_idx]),
-            transform=ax.transAxes, fontsize=style.ticklabel_fontsize)
+            transform=ax.transAxes, fontsize=ticklabel_fontsize)
 
     # make scatter
     markers = ['x', '+', 'v', 's']
@@ -477,23 +477,23 @@ def scatter_r2_vals(r2_vals, T_pi_idx, dim_vals, offset_vals, T_pi_vals,
                    label=lag_str, s=16)
     if legend:
         ax.legend(ncol=ncol, columnspacing=0.5,
-                  handletextpad=0, fontsize=style.ticklabel_fontsize - 1,
+                  handletextpad=0, fontsize=ticklabel_fontsize - 1,
                   fancybox=True, markerscale=.8, frameon=True,
                   bbox_to_anchor=bbox_to_anchor, loc=loc, handlelength=1.25)
         if legendtext:
             ax.text(.6, .5, 'dim',
-                    transform=ax.transAxes, fontsize=style.ticklabel_fontsize)
+                    transform=ax.transAxes, fontsize=ticklabel_fontsize)
             ax.text(.85, .5, 'lag',
-                    transform=ax.transAxes, fontsize=style.ticklabel_fontsize)
+                    transform=ax.transAxes, fontsize=ticklabel_fontsize)
 
     # add labels/titles
     if xlabel:
-        ax.set_xlabel(pca_label + " $R^2$", fontsize=style.axis_label_fontsize,
+        ax.set_xlabel(pca_label + " $R^2$", fontsize=axis_label_fontsize,
                       labelpad=-8)
     if ylabel:
-        ax.set_ylabel("DCA $R^2$", fontsize=style.axis_label_fontsize, labelpad=-8)
+        ax.set_ylabel("DCA $R^2$", fontsize=axis_label_fontsize, labelpad=-8)
     if title is not None:
-        ax.set_title(title, fontsize=style.title_fontsize)
+        ax.set_title(title, fontsize=title_fontsize)
 
 
 def plot_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=0, min_max_val=None,
@@ -513,15 +513,15 @@ def plot_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=0, min_ma
         min_max_val = np.max(np.abs(improvement_mean))
     ax.set_ylim([-min_max_val / 2., min_max_val])
     ax.set_yticks([-min_max_val / 2., 0, min_max_val])
-    ax.set_yticklabels([-min_max_val / 2., 0., min_max_val], fontsize=style.ticklabel_fontsize)
+    ax.set_yticklabels([-min_max_val / 2., 0., min_max_val], fontsize=ticklabel_fontsize)
     ax.text(.1, .1, 'lag = {} bins'.format(offset_vals[offset_idx]),
-            transform=ax.transAxes, fontsize=style.ticklabel_fontsize)
+            transform=ax.transAxes, fontsize=ticklabel_fontsize)
 
     # set ticks
     x_vals = T_pi_vals
     x_ticks = x_vals[1::2]
     ax.set_xticks(x_ticks)
-    ax.set_xticklabels(x_ticks.astype(np.int), fontsize=style.ticklabel_fontsize)
+    ax.set_xticklabels(x_ticks.astype(np.int), fontsize=ticklabel_fontsize)
 
     # plot zero line
     ax.axhline(0, c="black", linestyle="-", zorder=0, lw=1)
@@ -538,16 +538,16 @@ def plot_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=0, min_ma
 
     # make legend
     if legend:
-        ax.legend(frameon=True, fontsize=style.ticklabel_fontsize, fancybox=True,
+        ax.legend(frameon=True, fontsize=ticklabel_fontsize, fancybox=True,
                   bbox_to_anchor=bbox_to_anchor, loc=loc)
 
     # add labels/titles
     if xlabel:
         ax.set_xlabel(r"T ({} {} bins)".format(timestep, timestep_units),
-                      fontsize=style.axis_label_fontsize, labelpad=0)
+                      fontsize=axis_label_fontsize, labelpad=0)
     if ylabel:
-        ax.set_ylabel(r"$\Delta R^2$ improvement\nover SFA",
-                      fontsize=style.axis_label_fontsize, labelpad=-8)
+        ax.set_ylabel('$\Delta R^2$ improvement\nover SFA',
+                      fontsize=axis_label_fontsize, labelpad=-8)
 
 
 def plot_absolute_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=0, min_max_val=None,
@@ -577,18 +577,18 @@ def plot_absolute_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=
     ax.set_ylim([-min_max_val / 2., min_max_val])
     if min_max_val > 1.:
         ax.set_yticks([-.5, 0, 1])
-        ax.set_yticklabels([-.5, '0', 1], fontsize=style.ticklabel_fontsize)
+        ax.set_yticklabels([-.5, '0', 1], fontsize=ticklabel_fontsize)
     else:
         ax.set_yticks([-min_max_val / 2., 0, min_max_val])
-        ax.set_yticklabels([-min_max_val / 2., '0', min_max_val], fontsize=style.ticklabel_fontsize)
+        ax.set_yticklabels([-min_max_val / 2., '0', min_max_val], fontsize=ticklabel_fontsize)
     ax.text(.1, .1, 'lag = {} bins'.format(offset_vals[offset_idx]),
-            transform=ax.transAxes, fontsize=style.ticklabel_fontsize)
+            transform=ax.transAxes, fontsize=ticklabel_fontsize)
 
     # set ticks
     x_vals = T_pi_vals
     x_ticks = x_vals[1::2]
     ax.set_xticks(x_ticks)
-    ax.set_xticklabels(x_ticks.astype(np.int), fontsize=style.ticklabel_fontsize)
+    ax.set_xticklabels(x_ticks.astype(np.int), fontsize=ticklabel_fontsize)
 
     # plot zero line
     ax.axhline(0, c="black", linestyle="-", zorder=0, lw=1)
@@ -605,15 +605,15 @@ def plot_absolute_r2_vs_T(r2_vals, T_pi_vals, dim_vals, offset_vals, offset_idx=
 
     # make legend
     if legend:
-        ax.legend(frameon=True, fontsize=style.ticklabel_fontsize, fancybox=True,
+        ax.legend(frameon=True, fontsize=ticklabel_fontsize, fancybox=True,
                   bbox_to_anchor=bbox_to_anchor, loc=loc)
 
     # add labels/titles
     if xlabel:
         ax.set_xlabel(r"T ({} {} bins)".format(timestep, timestep_units),
-                      fontsize=style.axis_label_fontsize, labelpad=0)
+                      fontsize=axis_label_fontsize, labelpad=0)
     if ylabel:
-        ax.set_ylabel("{} $R^2$".format(name), fontsize=style.axis_label_fontsize, labelpad=-8)
+        ax.set_ylabel("{} $R^2$".format(name), fontsize=axis_label_fontsize, labelpad=-8)
 
 
 def make_comparison_axes(fig_width, fig_height, wpad_edge=0, wpad_mid=0, hpad_bottom=0, hpad_top=0,
@@ -637,21 +637,21 @@ def make_comparison_axes(fig_width, fig_height, wpad_edge=0, wpad_mid=0, hpad_bo
 
     fig.text(wpad_edge / 2, hpad_bottom + ax_height,
              "A", va="bottom", ha="right", color="black",
-             **style.panel_letter_fontstyle)
+             **panel_letter_fontstyle)
     fig.text(wpad_edge + ax_width + wpad_mid - wpad_edge + wpad_edge / 2,
              hpad_bottom + ax_height,
              "B", va="bottom", ha="right", color="black",
-             **style.panel_letter_fontstyle)
+             **panel_letter_fontstyle)
     fig.text(wpad_edge + 2 * ax_width + 2 * wpad_mid - wpad_edge + wpad_edge / 2,
              hpad_bottom + ax_height,
              "C", va="bottom", ha="right", color="black",
-             **style.panel_letter_fontstyle)
+             **panel_letter_fontstyle)
 
     return ax1, ax_inset, ax2, ax3
 
 
 def cycle_from_style(scheme):
-    return [color_dict["color"] for color_dict in plt.style.library[scheme]['axes.prop_cycle']]
+    return [color_dict["color"] for color_dict in plt.library[scheme]['axes.prop_cycle']]
 
 
 def plot_mi_vs_dim(mi_vals, labels, ax=None, legend=False, xlabel=False, max_dim=None, title=None):
@@ -671,7 +671,7 @@ def plot_mi_vs_dim(mi_vals, labels, ax=None, legend=False, xlabel=False, max_dim
 
     xticks = np.arange(0, max_dim + 1, 5, dtype=np.int)
     ax.set_xticks(xticks)
-    ax.set_xticklabels(xticks, fontsize=style.ticklabel_fontsize)
+    ax.set_xticklabels(xticks, fontsize=ticklabel_fontsize)
 
     yticks = [0, max_mi]
     max_ylabel = str(np.round(max_mi, 1))
@@ -679,7 +679,7 @@ def plot_mi_vs_dim(mi_vals, labels, ax=None, legend=False, xlabel=False, max_dim
         max_ylabel = "  " + max_ylabel
     ytick_labels = ["0", max_ylabel]
     ax.set_yticks(yticks)
-    ax.set_yticklabels(ytick_labels, fontsize=style.ticklabel_fontsize)
+    ax.set_yticklabels(ytick_labels, fontsize=ticklabel_fontsize)
     ax.tick_params(axis='y', which='major', pad=1)
 
     ax.spines['right'].set_visible(False)
@@ -693,15 +693,15 @@ def plot_mi_vs_dim(mi_vals, labels, ax=None, legend=False, xlabel=False, max_dim
         ax.plot(dims, pi_from_zero[i], label=labels[i], linewidth=linewidth,
                 color=method_colors[i], marker=".", markersize=markersize)
     if legend:
-        ax.legend(loc="upper left", fontsize=style.ticklabel_fontsize * 0.9,
+        ax.legend(loc="upper left", fontsize=ticklabel_fontsize * 0.9,
                   frameon=False, ncol=2, labelspacing=0.1, columnspacing=0.55,
                   bbox_to_anchor=(-0.0, 0.025, 1, 1))
     if xlabel:
-        ax.set_xlabel("dimensions retained", fontsize=style.axis_label_fontsize, labelpad=1)
-    ax.set_ylabel("MI (nats)", fontsize=style.axis_label_fontsize,
-                  labelpad=-style.axis_label_fontsize)
+        ax.set_xlabel("dimensions retained", fontsize=axis_label_fontsize, labelpad=1)
+    ax.set_ylabel("MI (nats)", fontsize=axis_label_fontsize,
+                  labelpad=-axis_label_fontsize)
     if title is not None:
-        ax.set_title(title, fontsize=style.axis_label_fontsize, pad=3)
+        ax.set_title(title, fontsize=axis_label_fontsize, pad=3)
 
 
 def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
@@ -722,24 +722,24 @@ def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
     max_dt = 20
     xticks = np.arange(0, max_dt + 1, 5, dtype=np.int)
     ax.set_xticks(xticks)
-    ax.set_xticklabels(xticks, fontsize=style.ticklabel_fontsize)
+    ax.set_xticklabels(xticks, fontsize=ticklabel_fontsize)
     ax.set_xlim([0, max_dt])
     y_min_main = np.min(np.concatenate((autocorr_1, autocorr_2)))
     y_min_main -= (1 - y_min_main) * .05
     yticks = [y_min_main, 0, 1]
     main_ytick_labels = [np.round(y_min_main, 1), "0.0", "1.0"]
     ax.set_yticks(yticks)
-    ax.set_yticklabels(main_ytick_labels, fontsize=style.ticklabel_fontsize)
+    ax.set_yticklabels(main_ytick_labels, fontsize=ticklabel_fontsize)
     ax.set_ylim([y_min_main, 1])
     ax.axhline(0, linestyle="-", linewidth=linewidth, color="black", zorder=0)
     ax.yaxis.set_tick_params(pad=1)
-    ax.set_ylabel("autocorrelation", fontsize=style.axis_label_fontsize, labelpad=1)
-    ax.set_xlabel(r"$\Delta t$ (100 ms bins)", fontsize=style.axis_label_fontsize, labelpad=1)
+    ax.set_ylabel("autocorrelation", fontsize=axis_label_fontsize, labelpad=1)
+    ax.set_xlabel("$\Delta t$ (100 ms bins)", fontsize=axis_label_fontsize, labelpad=1)
 
     # inset tick labels
     xticks = [0, 1, 2]
     ax_inset.set_xticks(xticks)
-    ax_inset.set_xticklabels(xticks, fontsize=style.ticklabel_fontsize * 0.75)
+    ax_inset.set_xticklabels(xticks, fontsize=ticklabel_fontsize * 0.75)
     ax_inset.spines['bottom'].set_bounds(0, 2)
     ax_inset.set_xlim([0, 2.065])
     y_min_inset = np.min(np.concatenate((autocorr_1[:3], autocorr_2[:3])))
@@ -747,7 +747,7 @@ def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
     ax_inset.set_ylim([y_min_inset, 1])
     ax_inset.set_yticks([y_min_inset, 1])
     inset_ytick_labels = [np.round(y_min_inset, 1), "1.0"]
-    ax_inset.set_yticklabels(inset_ytick_labels, fontsize=style.ticklabel_fontsize * 0.75)
+    ax_inset.set_yticklabels(inset_ytick_labels, fontsize=ticklabel_fontsize * 0.75)
     ax_inset.yaxis.set_tick_params(pad=1)
     ax_inset.xaxis.set_tick_params(pad=1)
     ax_inset.axvline(1, c="black", linestyle="--", linewidth=linewidth)
@@ -760,6 +760,7 @@ def plot_dca_autocorr_fns(ax, ax_inset, autocorr_1, autocorr_2):
     ax.add_patch(rect)
     ax.quiver(2.5, 0.7, 2.7, 0.1, angles='xy', scale_units='xy', scale=1, width=0.01, color="black")
     ax_inset.set_facecolor([0, 0, 0, 0])
-    ax.legend(loc="upper right", fontsize=style.ticklabel_fontsize * .9,
+    ax.legend(loc="upper right", fontsize=ticklabel_fontsize * .9,
                   frameon=False, ncol=1, labelspacing=0.1, columnspacing=0.6,
                   bbox_to_anchor=(0.05, 0.175, 1, 1))
+    

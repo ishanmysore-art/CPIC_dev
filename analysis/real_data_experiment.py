@@ -4,7 +4,7 @@ import os
 
 import torch
 from torch.utils.data import DataLoader
-from dca import analysis, data_util
+from dca import data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR

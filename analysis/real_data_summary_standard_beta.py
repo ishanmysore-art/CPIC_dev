@@ -1,7 +1,6 @@
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib
 
 
 def plot_CPIC(I_compress, I_predictive, save_file="fig/m1_CPIC_IC.png"):
@@ -40,4 +39,3 @@ if __name__ == "__main__":
         plot_CPIC(I_compress, I_predictive, save_file="fig/hc_dim{}_CPIC_IC.png".format(dim))
 
     import pdb; pdb.set_trace()
-

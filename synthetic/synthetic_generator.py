@@ -1,11 +1,11 @@
-import scipy, h5py
+import scipy
+import h5py
 import numpy as np
 from scipy.signal import resample
 from utils.cov_util import calc_cross_cov_mats_from_data
-from synthetic.utils.plot_util import lorenz_fig_axes, plot_3d, plot_lorenz_3d, plot_traces, plot_dca_demo, plot_r2, plot_cov
+from utils.plot_util import plot_lorenz_3d
 import matplotlib.pyplot as plt
 from dca import DynamicalComponentsAnalysis as DCA
-import pickle
 import argparse
 import os
 
@@ -233,7 +233,7 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
             X_dca = np.dot(X_noisy, V_dca)
             X_pca = np.dot(X_noisy, V_pca)
 
-            # Linearly trasnform projected data to be close to original Lorenz attractor
+            # Linearly transform projected data to be close to original Lorenz attractor
             beta_pca = np.linalg.lstsq(X_pca, X_dynamics, rcond=None)[0]
             beta_dca = np.linalg.lstsq(X_dca, X_dynamics, rcond=None)[0]
             X_pca_trans = np.dot(X_pca, beta_pca)
@@ -247,21 +247,21 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='synthetic data generation.')
     parser.add_argument('--seed', type=int, default=22) # original seed = 42
-    parser.add_argument('--RESULTS_FILENAME', type=str, default="./data/lorenz/lorenz_exploration.hdf5", help="the files can be "
-                                                                                                               "../data/lorenz/lorenz_exploration.hdf5 or ../data/lorenz/lorenz_results.hdf5")
+    parser.add_argument('--RESULTS_FILENAME', type=str, default="../synthetic/data/lorenz/lorenz_exploration.hdf5", help="the files can be "
+                                                                                                               "../synthetic/data/lorenz/lorenz_exploration.hdf5 or ../synthetic/data/lorenz/lorenz_results.hdf5")
     args = parser.parse_args()
     seed = args.seed
     np.random.seed(seed)
     RESULTS_FILENAME = args.RESULTS_FILENAME
     do_vis = False
 
-    #Set parameters
+    # Set parameters
     T = 4
     N = 30
     noise_dim = 5
-    if RESULTS_FILENAME == "./data/lorenz/lorenz_results.hdf5":
+    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_results.hdf5":
         snr_vals = np.array([0.01, 0.02, 0.05, 0.1, 1])
-    if RESULTS_FILENAME == "./data/lorenz/lorenz_exploration.hdf5":
+    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_exploration.hdf5":
         snr_vals = np.logspace(-3.0, -1.0, num=10)
 
     # generate data
@@ -309,3 +309,4 @@ if __name__ == "__main__":
     plt.plot(snr_vals, r2_dca, label="DCA")
     plt.legend()
     plt.show()
+    

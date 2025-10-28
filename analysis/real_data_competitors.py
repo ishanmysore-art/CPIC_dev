@@ -1,7 +1,4 @@
-import h5py, os
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
 import pickle
 
 from dca import analysis, data_util
@@ -58,5 +55,4 @@ with open("res/ms_stochastic_infonce/result_cpt.pkl", "wb") as f:
     pickle.dump(ms_results, f)
 
 # visualization
-
 import pdb; pdb.set_trace()

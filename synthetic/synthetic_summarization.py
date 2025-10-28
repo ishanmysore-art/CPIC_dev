@@ -2,7 +2,7 @@ import pickle
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-from synthetic.utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
+from utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
 from synthetic_experiment import plot_latent_trials
 linewidth_3d = 0.5
 num_vis = 500
@@ -220,5 +220,3 @@ if __name__ == "__main__":
                 plot_latent_trials(X_dynamics, X_pca_trans=None, X_dca_trans=None, X_CPIC_trans=X_cpic_trans,
                                    num_vis=num_vis, snr_val=snr_val, save_dir=saved_root,
                                    plot_lorenz_func=plot_lorenz_3d_colored, max_2norm=max_2norm)
-
-    import pdb; pdb.set_trace()

@@ -139,6 +139,3 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("fig/R2_lorenz_mean_{}.png".format(num_init))
     plt.show()
-
-
-    import pdb; pdb.set_trace()

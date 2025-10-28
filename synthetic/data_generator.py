@@ -6,7 +6,6 @@ from sdepy import *  # safe and handy for interactive sessions
 import os
 
 # Gaussian Process package
-import sklearn
 from sklearn.gaussian_process.kernels import RBF
 np.random.seed(42)
 
@@ -169,5 +168,3 @@ if __name__ == "__main__":
 
 
     import pdb; pdb.set_trace()
-
-

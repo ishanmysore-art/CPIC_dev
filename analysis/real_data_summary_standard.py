@@ -1,7 +1,5 @@
 import pickle
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
 
 
 def summary_statistics(x, axis=0):
@@ -55,4 +53,3 @@ if __name__ == "__main__":
 
 
     import pdb; pdb.set_trace()
-

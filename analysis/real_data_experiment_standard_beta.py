@@ -5,11 +5,10 @@ import json
 
 import torch
 from torch.utils.data import DataLoader
-from dca import analysis, data_util
+from dca import data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
-from synthetic.utils.data_util import CrossValidate
 from synthetic.utils.cov_util import form_lag_matrix
 import pickle
 
