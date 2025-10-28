@@ -5,7 +5,25 @@ from scipy.interpolate import interp1d
 from scipy.signal import resample
 from scipy.ndimage import convolve1d
 
-from utils.cov_util import form_lag_matrix  # noqa:F401
+from numpy.lib.stride_tricks import as_strided
+from sklearn.utils import check_random_state
+
+
+def compute_R2(X_inf, X_true):
+    """
+    compute R2 value
+    :param X_inf: inferred X dim T x N
+    :param X_true: true X dim T x N
+    :return:
+    """
+    return 1 - np.sum((X_inf - X_true)**2) / np.sum(
+        (X_true - np.mean(X_true, axis=0)) ** 2)
+
+
+def linear_alignment(X_inf, X_true):
+    beta = np.linalg.lstsq(X_inf, X_true, rcond=None)[0]
+    X_trans = np.dot(X_inf, beta)
+    return X_trans
 
 
 def sum_over_chunks(X, stride):

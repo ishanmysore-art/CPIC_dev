@@ -6,8 +6,13 @@ from matplotlib import patches
 from matplotlib.patches import Ellipse
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-from utils.plotting import style
+# from style.py
+ticklabel_fontsize = 6
+axis_label_fontsize = 20
+title_fontsize = 10
 
+panel_letter_fontstyle = {'fontsize': 10,
+                          'weight': 'bold'}
 dim_colors = ["red", "coral", "gray", "black"]
 
 

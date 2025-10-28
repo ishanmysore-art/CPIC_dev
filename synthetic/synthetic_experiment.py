@@ -1,10 +1,9 @@
-from CPIC import PastFutureDataset, train_CPIC, DCA_init
-from utils.util import linear_alignment
-from utils.metrics import compute_R2
+from cpic.CPIC import PastFutureDataset, train_CPIC, DCA_init
+from utils.data_util import linear_alignment, compute_R2
 import torch
 from torch.utils.data import DataLoader
 import h5py
-from utils.plotting.fig1 import plot_lorenz_3d, plot_lorenz_3d_colored
+from synthetic.utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
 import matplotlib.pyplot as plt
 from configparser import ConfigParser
 import argparse

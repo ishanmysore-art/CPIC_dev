@@ -8,8 +8,8 @@ from dca import analysis, data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
-from data_util import CrossValidate
-from utils.cov_util import calc_pi_from_cross_cov_mats, form_lag_matrix
+from synthetic.utils.data_util import CrossValidate
+from synthetic.utils.cov_util import form_lag_matrix
 import pickle
 
 
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="CPIC")
     args = parser.parse_args()
     if args.model == "CPIC":
-        from CPIC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
+        from cpic.CPIC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
     if args.model == "PFPC_RC":
         from PFPC_RC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
     if args.config == 'm1_stochastic_infonce':
