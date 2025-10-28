@@ -1,9 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
-import tqdm
-from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from dca import DynamicalComponentsAnalysis as DCA
 
 
@@ -185,7 +183,7 @@ def mine_lower_bound(scores, device='cuda:0'):
     return tuba_lower_bound(scores, device=device)
 
 
-def infonec_upper_bound(scores, device='cuda:0'):
+def infonce_upper_bound(scores, device='cuda:0'):
     '''Bound from Van Den Oord and al. (2018)
     scores are either known log conditional distribution log p(y|x) or critic function f(x,y).
     '''
@@ -196,7 +194,7 @@ def infonec_upper_bound(scores, device='cuda:0'):
 def infonce_lower_bound(scores):
     '''Bound from Van Den Oord and al. (2018)'''
     nll = torch.mean(torch.diag(scores) - torch.logsumexp(scores,dim=1))
-    k =scores.size()[0]
+    k = scores.size()[0]
     mi = np.log(k) + nll
     return mi
 
@@ -237,7 +235,7 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
     if estimator == 'infonce_lower':
         mi = infonce_lower_bound(scores)
     elif estimator == "infonce_upper":
-        mi = infonec_upper_bound(scores, device=device)
+        mi = infonce_upper_bound(scores, device=device)
     elif estimator == "vub":
         mi = vub_upper_bound(decoded_mean, decoded_vars, device=device)
     elif estimator == "nwj":
