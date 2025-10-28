@@ -1,5 +1,4 @@
 import torch
-import math
 from torch import nn
 from torch import cuda
 from torch.nn import functional as F

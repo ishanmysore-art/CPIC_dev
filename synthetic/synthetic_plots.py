@@ -114,14 +114,14 @@ temp_cipc[9][8] = 0.930
 temp_cipc[9][9] = 0.937
 R2_CPICs_old = np.array(temp_cipc)
 
-num_init = 10
+num_init = 100
 
 # collect the CPIC data.
 R2_CPICs = list()
 loss_CPIC = list()
 saved_root = "res/lorenz_stochastic_infonce_exploration"
 for i in range(num_init):
-    with open(saved_root + "/latent_R2_seed{}.pkl".format(i), "rb") as f:
+    with open(saved_root + "/latent_R2.pkl".format(i), "rb") as f:
         res = pickle.load(f)
     R2_metrics = res["R2_metrics"]
     R2_CPICs.append(R2_metrics)
@@ -231,6 +231,4 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("fig/R2_lorenz.png")
     plt.show()
-
-
-    import pdb; pdb.set_trace()
+    
