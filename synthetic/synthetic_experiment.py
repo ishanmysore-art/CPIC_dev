@@ -1,9 +1,10 @@
-from cpic.CPIC import PastFutureDataset, train_CPIC, DCA_init
+from cpic.CPIC import train_CPIC
+from cpic.utils import PastFutureDataset, DCA_init
 from utils.data_util import linear_alignment, compute_R2
 import torch
 from torch.utils.data import DataLoader
 import h5py
-from synthetic.utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
+from utils.plot_util import plot_lorenz_3d_colored
 import matplotlib.pyplot as plt
 from configparser import ConfigParser
 import argparse
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
     saved_root = cfg.get('User', 'saved_root')
     if not os.path.exists(saved_root):
-        os.mkdir(saved_root)
+        os.makedirs(saved_root, exist_ok=True)
 
     # set hyper-parameters
     beta = cfg.getfloat('Hyperparameters', 'beta')

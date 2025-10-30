@@ -14,11 +14,11 @@ CPIC requests the pre-installation of DCA package for initialization. Please ref
 ### Synthetic Experiments
 
 1. Lorenz experiment code: <code>synthetic/synthetic_*.py</code>
-   1. Synthetic data generation using <code>synthetic_generation.py</code>.
+   1. Synthetic data generation using <code>synthetic_generator.py</code>.
    2. CPIC model on synthetic data using <code>synthetic_experiment.py</code>.
    3. Other models on synthetic data using <code>synthetic_competitors.py</code>.
    4. Per/Post analysis includes <code>synthetic_plot.py</code>, <code>synthetic_summarization.py</code>, <code>synthetic_summary.py</code>, <code>synthetic_visualization.py</code>.
-2. Synthetic experiments to understand the Prediction information in CPIC setting: <code>synthetic/synthetic/*</code>
+2. Synthetic experiments to understand the Prediction information in CPIC setting:
    1. Synthetic data generation with <code>synthetic/data_generator.py</code>.
    2. PI analysis using <code>synthetic/PI_analysis.py</code>.
 

@@ -2,7 +2,6 @@ import h5py
 from utils.data_util import compute_R2
 from dca import DynamicalComponentsAnalysis as DCA
 import numpy as np
-import scipy
 import pickle
 from tqdm import tqdm
 
@@ -61,4 +60,5 @@ if __name__ == "__main__":
     # save result
     with open("res/lorenz_dca/latent_R2_{}.pkl".format(N), "wb") as f:
         pickle.dump({"R2_DCAs": R2_DCAs, "best_R2_DCAs": best_R2_DCAs}, f)
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
+    

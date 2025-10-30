@@ -1,12 +1,10 @@
-import h5py, pickle
+import h5py
+import pickle
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.signal import resample
 from scipy.ndimage import convolve1d
-
-from numpy.lib.stride_tricks import as_strided
-from sklearn.utils import check_random_state
 
 
 def compute_R2(X_inf, X_true):
@@ -200,3 +198,4 @@ class CrossValidate:
 
         self.fold_idx += 1
         return X_train, X_test, Y_train, Y_test, fold_idx
+    

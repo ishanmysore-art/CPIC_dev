@@ -3,15 +3,8 @@ from torch import nn
 import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader, Dataset
-from dca import DynamicalComponentsAnalysis as DCA
+from utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
 
-from utils import (
-    StructuredEncoder,
-    CRITICS,
-    BASELINES,
-    estimate_mutual_information
-)
 
 class CPIC(nn.Module):
     """Compressed Predictive Information Coding.
@@ -131,10 +124,10 @@ class CPIC(nn.Module):
             I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], x_past,
                                                            encoded_past_reshaped, decoder=self.encoder, device=self.device)
         if self.predictive_space == "latent":
-             I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
-                                                              encoded_past_reshaped,
-                                                              encoded_future_reshaped, critic_fn=self.critic,
-                                                              baseline_fn=self.baseline, device=self.device)
+            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
+                                                             encoded_past_reshaped,
+                                                             encoded_future_reshaped, critic_fn=self.critic,
+                                                             baseline_fn=self.baseline, device=self.device)
         elif self.predictive_space == "observation":
             I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
                                                              encoded_past_reshaped,
@@ -178,8 +171,8 @@ class CPIC(nn.Module):
         # TO-DO
         pass
 
-    def score(self, X):
-        # TO-DO
+    def score(self, X, Y):
+        # TO-DO (score based on mutual information between X and Y for compresion complexity and predictive information)
         pass
 
 

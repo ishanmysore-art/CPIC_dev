@@ -3,3 +3,7 @@ __pycache__
 *.pkl
 tensor_logs/*
 .idea/*
+*.egg-info/
+dist/*
+*.pyc
+.venv/*
