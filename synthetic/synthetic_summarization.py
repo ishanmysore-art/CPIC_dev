@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
 from synthetic_experiment import plot_latent_trials
+import argparse
 linewidth_3d = 0.5
 num_vis = 500
 
@@ -54,11 +55,12 @@ def plot_trials(X, num_vis=200, file_name="true_lorenz_dynamics"):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Summarize Lorenz trajectories and corresponding metrics.')
+    parser.add_argument('--do_exploration', type=bool, default=True,
+                        help='Whether to summarize Lorenz exploration results.')
+    args = parser.parse_args()
 
-    do_summarization_lorenz = False
-    do_summarization_lorenz_exploration = True
-
-    if do_summarization_lorenz:
+    if not args.do_exploration:
         RESULTS_FILENAME = "data/lorenz/lorenz_results.hdf5"
         # summarize R2 scores
         with open("res/lorenz_deterministic_infonce/latent_R2.pkl", "rb") as f:
@@ -128,35 +130,69 @@ if __name__ == "__main__":
         for i in range(4):
             plot_trials(stochastic_tuba_trials[i], num_vis=num_vis, file_name="sto_pfpc_tuba_snr{}".format(snr_vals[i]))
 
-    if do_summarization_lorenz_exploration:
+    if args.do_exploration:
         RESULTS_FILENAME = "data/lorenz/lorenz_exploration.hdf5"
+        
         CPIC_det_R2s = []
+        DCA_det_R2s = []
+        PCA_det_R2s = []
+
         CPIC_R2s = []
+        DCA_R2s = []
+        PCA_R2s = []
+
         CPIC_det_obs_R2s = []
+        DCA_det_obs_R2s = []
+        PCA_det_obs_R2s = []
+
         CPIC_obs_R2s = []
+        DCA_obs_R2s = []
+        PCA_obs_R2s = []
 
         N = 100
-
         for i in range(N):
             # summarize R2 scores
-            with open("res/lorenz_deterministic_infonce_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
+            with open("res/lorenz_deterministic_infonce_exploration/latent_R2.pkl".format(i), "rb") as f:
                 deterministic_infonce_R2s_res = pickle.load(f)
             CPIC_det_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, -1])
+            DCA_det_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, 1])
+            PCA_det_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, 0])
+            
             snr_vals = deterministic_infonce_R2s_res['snr_vals']
-            with open("res/lorenz_stochastic_infonce_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
+
+            with open("res/lorenz_stochastic_infonce_exploration/latent_R2.pkl".format(i), "rb") as f:
                 stochastic_infonce_R2s_res = pickle.load(f)
             CPIC_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, -1])
-            with open("res/lorenz_deterministic_infonce_obs_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
-                deterministic_infonce_R2s_res = pickle.load(f)
-            CPIC_det_obs_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, -1])
-            snr_vals = deterministic_infonce_R2s_res['snr_vals']
-            with open("res/lorenz_stochastic_infonce_obs_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
+            DCA_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 1])
+            PCA_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 0])
+
+            with open("res/lorenz_deterministic_infonce_obs_exploration/latent_R2.pkl".format(i), "rb") as f:
+                deterministic_infonce_obs_R2s_res = pickle.load(f)
+            CPIC_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, -1])
+            DCA_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, 1])
+            PCA_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, 0])
+            
+            with open("res/lorenz_stochastic_infonce_obs_exploration/latent_R2.pkl".format(i), "rb") as f:
                 stochastic_infonce_R2s_res = pickle.load(f)
             CPIC_obs_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, -1])
-        CPIC_obs_R2s = np.stack(CPIC_obs_R2s)
-        CPIC_R2s = np.stack(CPIC_R2s)
-        CPIC_det_obs_R2s = np.stack(CPIC_det_obs_R2s)
+            DCA_obs_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 1])
+            PCA_obs_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 0])
+
         CPIC_det_R2s = np.stack(CPIC_det_R2s)
+        DCA_det_R2s = np.stack(DCA_det_R2s)
+        PCA_det_R2s = np.stack(PCA_det_R2s)
+
+        CPIC_R2s = np.stack(CPIC_R2s)
+        DCA_R2s = np.stack(DCA_R2s)
+        PCA_R2s = np.stack(PCA_R2s)
+
+        CPIC_det_obs_R2s = np.stack(CPIC_det_obs_R2s)
+        DCA_det_obs_R2s = np.stack(DCA_det_obs_R2s)
+        PCA_det_obs_R2s = np.stack(PCA_det_obs_R2s)
+
+        CPIC_obs_R2s = np.stack(CPIC_obs_R2s)
+        DCA_obs_R2s = np.stack(DCA_obs_R2s)
+        PCA_obs_R2s = np.stack(PCA_obs_R2s)
 
         CPIC_obs_R2s_mindx = np.argsort(CPIC_obs_R2s, axis=0)[N//2]
         CPIC_R2s_mindx = np.argsort(CPIC_R2s, axis=0)[N//2]
@@ -167,27 +203,39 @@ if __name__ == "__main__":
                       "CPIC": CPIC_R2s_mindx,
                       "CPIC_obs": CPIC_obs_R2s_mindx}
 
-
-
+        # plot R2 scores
         fig = plt.figure()
-        plt.plot(snr_vals, np.median(CPIC_R2s, axis=0), label="Sto")
-        plt.plot(snr_vals, np.median(CPIC_obs_R2s, axis=0), label="Sto_obs")
-        plt.plot(snr_vals, np.median(CPIC_det_R2s, axis=0), label="Det")
-        plt.plot(snr_vals, np.median(CPIC_det_obs_R2s, axis=0), label="Det_obs")
+        plt.plot(snr_vals, np.median(CPIC_R2s, axis=0), label="CPIC Sto")
+        plt.plot(snr_vals, np.median(DCA_R2s, axis=0), label="DCA Sto")
+        plt.plot(snr_vals, np.median(PCA_R2s, axis=0), label="PCA Sto")
+
+        plt.plot(snr_vals, np.median(CPIC_obs_R2s, axis=0), label="CPIC Sto_obs")
+        plt.plot(snr_vals, np.median(DCA_obs_R2s, axis=0), label="DCA Sto_obs")
+        plt.plot(snr_vals, np.median(PCA_obs_R2s, axis=0), label="PCA Sto_obs")
+
+        plt.plot(snr_vals, np.median(CPIC_det_R2s, axis=0), label="CPIC Det")
+        plt.plot(snr_vals, np.median(DCA_det_R2s, axis=0), label="DCA Det")
+        plt.plot(snr_vals, np.median(PCA_det_R2s, axis=0), label="PCA Det")
+
+        plt.plot(snr_vals, np.median(CPIC_det_obs_R2s, axis=0), label="CPIC Det_obs")
+        plt.plot(snr_vals, np.median(DCA_det_obs_R2s, axis=0), label="DCA Det_obs")
+        plt.plot(snr_vals, np.median(PCA_det_obs_R2s, axis=0), label="PCA Det_obs")
+        
+        plt.xlabel("SNR")
+        plt.ylabel("R2 Score")
         plt.legend()
         plt.xscale('log')
         plt.show()
-        # import pdb; pdb.set_trace()
 
         # plot latent trials
         # # load data
         with h5py.File(RESULTS_FILENAME, "r") as f:
             snr_vals = f.attrs["snr_vals"][:]
-            # X = f["X"][:]
+            X = f["X"][:]
             X_dynamics = f["X_dynamics"][:]
-            # X_noisy_dset = f["X_noisy"][:]
-            # X_pca_trans_dset = f["X_pca_trans"][:]
-            # X_dca_trans_dset = f["X_dca_trans"][:]
+            X_noisy_dset = f["X_noisy"][:]
+            X_pca_trans_dset = f["X_pca_trans"][:]
+            X_dca_trans_dset = f["X_dca_trans"][:]
 
         indexes = [0, 5, 9] # refer to the snr 0.001, 0.01 and 0.1
         snrs = [0.001, 0.01, 0.1]

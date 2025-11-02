@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
-from utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
+from cpic.utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
 
 
 class CPIC(nn.Module):
