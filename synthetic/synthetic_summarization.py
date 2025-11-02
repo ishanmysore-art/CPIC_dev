@@ -152,7 +152,7 @@ if __name__ == "__main__":
         N = 100
         for i in range(N):
             # summarize R2 scores
-            with open("res/lorenz_deterministic_infonce_exploration/latent_R2.pkl".format(i), "rb") as f:
+            with open("res/lorenz_deterministic_infonce_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
                 deterministic_infonce_R2s_res = pickle.load(f)
             CPIC_det_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, -1])
             DCA_det_R2s.append(deterministic_infonce_R2s_res['R2_metrics'][:, 1])
@@ -160,19 +160,19 @@ if __name__ == "__main__":
             
             snr_vals = deterministic_infonce_R2s_res['snr_vals']
 
-            with open("res/lorenz_stochastic_infonce_exploration/latent_R2.pkl".format(i), "rb") as f:
+            with open("res/lorenz_stochastic_infonce_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
                 stochastic_infonce_R2s_res = pickle.load(f)
             CPIC_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, -1])
             DCA_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 1])
             PCA_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 0])
 
-            with open("res/lorenz_deterministic_infonce_obs_exploration/latent_R2.pkl".format(i), "rb") as f:
+            with open("res/lorenz_deterministic_infonce_obs_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
                 deterministic_infonce_obs_R2s_res = pickle.load(f)
             CPIC_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, -1])
             DCA_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, 1])
             PCA_det_obs_R2s.append(deterministic_infonce_obs_R2s_res['R2_metrics'][:, 0])
             
-            with open("res/lorenz_stochastic_infonce_obs_exploration/latent_R2.pkl".format(i), "rb") as f:
+            with open("res/lorenz_stochastic_infonce_obs_exploration/latent_R2_seed{}.pkl".format(i), "rb") as f:
                 stochastic_infonce_R2s_res = pickle.load(f)
             CPIC_obs_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, -1])
             DCA_obs_R2s.append(stochastic_infonce_R2s_res['R2_metrics'][:, 1])

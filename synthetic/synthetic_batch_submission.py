@@ -12,15 +12,15 @@ if __name__ == "__main__":
     for i in tqdm(range(args.start_seed, args.end_seed)):
         print("seed: {}".format(i))
         if args.method == "CPIC":
-            os.system('python code/synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_exploration --device {}'
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_exploration --device {}'
                       .format(i, args.device))
         if args.method == "CPIC_obs":
             os.system(
-                'python code/synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration --device {}'
+                'python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration --device {}'
                 .format(i, args.device))
         if args.method == "CPIC_deterministic":
-            os.system('python code/synthetic_experiment.py --seed {} --config lorenz_deterministic_infonce_exploration --device {}'
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_deterministic_infonce_exploration --device {}'
                       .format(i, args.device))
         if args.method == "CPIC_deterministic_obs":
-            os.system('python code/synthetic_experiment.py --seed {} --config lorenz_deterministic_infonce_obs_exploration --device {}'
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_deterministic_infonce_obs_exploration --device {}'
                       .format(i, args.device))

@@ -7,7 +7,7 @@ def collect_data(saved_root, num_init):
     R2_CPICs = list()
     loss_CPICs = list()
     for i in range(num_init):
-        with open(saved_root + "/latent_R2.pkl".format(i), "rb") as f:
+        with open(saved_root + "/latent_R2_seed{}.pkl".format(i), "rb") as f:
             res = pickle.load(f)
         R2_metrics = res["R2_metrics"]
         R2_CPICs.append(R2_metrics)
