@@ -1,3 +1,5 @@
+import sys, os
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 from cpic.CPIC import train_CPIC
 from cpic.utils import PastFutureDataset, DCA_init
 from utils.data_util import linear_alignment, compute_R2
@@ -8,7 +10,6 @@ from utils.plot_util import plot_lorenz_3d_colored
 import matplotlib.pyplot as plt
 from configparser import ConfigParser
 import argparse
-import os
 import pickle
 import numpy as np
 
@@ -114,6 +115,10 @@ if __name__ == "__main__":
         config_file = './config/config_lorenz_stochastic_infonce_exploration.ini'
     elif args.config == 'lorenz_stochastic_infonce_obs_exploration':
         config_file = './config/config_lorenz_stochastic_infonce_obs_exploration.ini'
+    elif args.config == 'lorenz_stochastic_infonce_obs_exploration_conv':
+        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration_conv.ini'
+    elif args.config == 'lorenz_stochastic_infonce_exploration_conv':
+        config_file = './config/config_lorenz_stochastic_infonce_exploration_conv.ini'
     else:
         raise ValueError("{} has not been implemented!".format(args.config))
 
@@ -144,6 +149,16 @@ if __name__ == "__main__":
         critic_params = {"x_dim": T * ydim, "y_dim": T * xdim, "hidden_dim": hidden_dim}
     baseline_params = {"hidden_dim": hidden_dim}
     deterministic = cfg.getboolean('Hyperparameters', 'deterministic')
+    
+    # get encoder parameters with defaults
+    encoder_type = cfg.get('Hyperparameters', 'encoder_type') if cfg.has_option('Hyperparameters', 'encoder_type') else 'mlp'
+    conv_kernel_size = cfg.getint('Hyperparameters', 'conv_kernel_size') if cfg.has_option('Hyperparameters', 'conv_kernel_size') else 3
+    conv_stride = cfg.getint('Hyperparameters', 'conv_stride') if cfg.has_option('Hyperparameters', 'conv_stride') else 1
+    conv_padding = cfg.getint('Hyperparameters', 'conv_padding') if cfg.has_option('Hyperparameters', 'conv_padding') else 1
+    n_layers = cfg.getint('Hyperparameters', 'n_layers') if cfg.has_option('Hyperparameters', 'n_layers') else 1
+    activation = cfg.get('Hyperparameters', 'activation') if cfg.has_option('Hyperparameters', 'activation') else 'relu'
+    linear_encoding = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else True
+    
     # set training parameters
     do_vis_latent_trials = cfg.getboolean('Training', 'do_vis_latent_trials')
     batch_size = cfg.getint('Training', 'batch_size')
@@ -184,10 +199,20 @@ if __name__ == "__main__":
             init_weights = None
         CPIC, loss = train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_dataloader,
                           signiture=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
-                          num_early_stop=num_early_stop, device=device, predictive_space=predictive_space)
+                          num_early_stop=num_early_stop, device=device, predictive_space=predictive_space,
+                          encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride,
+                          conv_padding=conv_padding, n_layers=n_layers, activation=activation, linear_encoding=linear_encoding)
         CPIC = CPIC.to(device)
         encoded_mean = CPIC.encode(torch.from_numpy(X_noisy).to(device))
-        X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)
+        encoded_mean_np = encoded_mean.cpu().detach().numpy()
+        
+        # check for NaN/Inf values before alignment
+        if np.any(np.isnan(encoded_mean_np)) or np.any(np.isinf(encoded_mean_np)):
+            print(f"WARNING: NaN or Inf found in encoded_mean. Skipping linear_alignment for this seed.")
+            print(f"encoded_mean shape: {encoded_mean_np.shape}, NaN count: {np.isnan(encoded_mean_np).sum()}, Inf count: {np.isinf(encoded_mean_np).sum()}")
+            X_CPIC_trans = aligned_encoded_mean = encoded_mean_np  # Skip alignment if NaN/Inf
+        else:
+            X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean_np, X_dynamics)
         R2_PCA = compute_R2(X_pca_trans, X_dynamics)
         R2_DCA = compute_R2(X_dca_trans, X_dynamics)
         R2_CPIC = compute_R2(aligned_encoded_mean, X_dynamics)

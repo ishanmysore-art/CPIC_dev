@@ -3,7 +3,8 @@ from torch import nn
 import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
-from utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
+import os
+from .utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
 
 
 class CPIC(nn.Module):
@@ -74,7 +75,7 @@ class CPIC(nn.Module):
     """
     def __init__(self, xdim, ydim, mi_params, critic_params, baseline_params, T=4, beta=1e-3, beta1=1, beta2=1, hidden_dim=256,
                  deterministic=False, linear_encoding=True, init_weights=None, device='cuda:0', critic_params_YX=None, predictive_space="latent",
-                 regularization_weight=0):
+                 regularization_weight=0, encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1, n_layers=1, activation='relu'):
         super(CPIC, self).__init__()
 
         self.predictive_space = predictive_space
@@ -86,8 +87,14 @@ class CPIC(nn.Module):
         self.T = T
         self.deterministic = deterministic
         self.linear_encoding = linear_encoding
-        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, T=self.T, deterministic=deterministic, device=device, linear_encoding=linear_encoding)
+        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, T=self.T, 
+                                        deterministic=deterministic, device=device, linear_encoding=linear_encoding,
+                                        encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, 
+                                        conv_stride=conv_stride, conv_padding=conv_padding, n_layers=n_layers, 
+                                        activation=activation)
         self.encoder.to(device)
+        if os.getenv("CPIC_DEBUG", "0") == "1":
+            print(f"[CPIC] encoder_type={encoder_type}, linear_encoding={linear_encoding}, encoder_mean_module={type(self.encoder._mean).__name__}")
         # initialize critic and baseline for I_compress, I_predictive
         if init_weights is not None:
             self.encoder._mean.weight = torch.nn.parameter.Parameter(torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(device))
@@ -178,10 +185,13 @@ class CPIC(nn.Module):
 
 def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_loader, T=4, signiture=22,
                deterministic=False, linear_encoding=True, init_weights=None, num_early_stop=0, device="cuda:0", lr=1e-4, beta1=1, beta2=0,
-               critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False):
+               critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False,
+               encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1, n_layers=1, activation='relu'):
     model = CPIC(xdim, ydim, mi_params, critic_params, baseline_params, T=T, beta=beta, beta1=beta1, beta2=beta2,
                  deterministic=deterministic, linear_encoding=linear_encoding, init_weights=init_weights, device=device, critic_params_YX=critic_params_YX,
-                 predictive_space=predictive_space, regularization_weight=regularization_weight)
+                 predictive_space=predictive_space, regularization_weight=regularization_weight,
+                 encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, 
+                 conv_padding=conv_padding, n_layers=n_layers, activation=activation)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     if init_weights is not None:
         do_init = True
@@ -207,6 +217,10 @@ def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_
             # if torch.isnan(loss):
             #     model(x_past_batch, x_future_batch, debug=True)
             loss.backward()
+            
+            #add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             # check if gradients are nan
             grad_bool = True
             for name, param in model.named_parameters():

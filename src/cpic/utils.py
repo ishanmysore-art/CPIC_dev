@@ -37,46 +37,79 @@ def mlp(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
     layers += [nn.Linear(hidden_dim, output_dim)]
     return nn.Sequential(*layers)
 
-
-def conv_encoder(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
+   
+def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
     '''
-    1D convolutional encoder
-    input_dim: input dim (num features)
-    hidden_dim: hidden dim
-    output_dim: output dim
-    n_layers: number of layers
-    activation: activation function (relu by default)
-    T: time window
-    kernel_size: conv kernel size
-    stride: conv stride
-    padding: conv padding
+    2D convolutional encoder that convolves over features
+        input_dim: input feature dimension (xdim)
+        hidden_dim: num channels in hidden layers & output layer
+        output_dim: output feature dimension (ydim)
+        n_hidden_layers: number of hidden layers (there are 2 conv layers + 1 linear layer by default)
+        activation: activation function (relu by default)
+        T: time window    
+        kernel_size: conv kernel size (applied over feature dimension with kernel_height)
+        stride: conv stride
+        padding: conv padding
     '''
+    # input shape: (batch, 1, input_dim, length) - reshape_for_conv will handle this
     if activation == 'relu':
         activation_f = nn.ReLU()
     
-    layers = []
+    # helper function to compute output dimension of a conv layer
+    # will let us figure out the final size of input to the linear layer
+    def conv_output_dim(input_dim, kernel_size, stride, padding):
+        return (input_dim + (2 * padding) - kernel_size) // stride + 1
     
-    # first conv layer
-    layers.append(nn.Conv1d(input_dim, hidden_dim, kernel_size=kernel_size, stride=stride, padding=padding))
-    if T is not None:
-        layers.append(nn.BatchNorm1d(hidden_dim))
-    layers.append(activation_f)
+    conv_layers = []
+
+    # first conv layer: in_channels=1, out_channels=hidden_dim
+    # kernel_size=(kernel_size, 1) to convolve over feature dimension with kernel_height
+    conv_layers.append(nn.Conv2d(1, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+    final_num_features = conv_output_dim(input_dim, kernel_size, stride, padding)
+
+    # batchnorm regardless of T to ensure stability
+    conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+    conv_layers.append(activation_f)
     
-    # additional conv layers, specified by n_layers
-    for _ in range(n_layers):
-        layers.append(nn.Conv1d(hidden_dim, hidden_dim, kernel_size=kernel_size, stride=stride, padding=padding))
-        if T is not None:
-            layers.append(nn.BatchNorm1d(hidden_dim))
-        layers.append(activation_f)
+    for _ in range(n_hidden_layers):
+        conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+        final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
+
+        # batchnorm regardless of T to ensure stability
+        conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+        conv_layers.append(activation_f)
     
-    # global average pooling to reduce temporal dimension
-    layers.append(nn.AdaptiveAvgPool1d(1))
+    conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+    final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
+
+    flattened_dim = hidden_dim * final_num_features
+
+    if flattened_dim < 0:
+        print('oh no! flattened_dim is negative')
+
+    class ConvEncoder(nn.Module):
+        def __init__(self, conv_layers, flattened_dim, output_dim):
+            super().__init__()
+            self.conv_seq = nn.Sequential(*conv_layers)
+            self.flattened_dim = flattened_dim
+            self.output_dim = output_dim
+            self.linear = nn.Linear(self.flattened_dim, self.output_dim)
+
+        def forward(self, x):
+            output = self.conv_seq(x)
+            if output.shape[2] * output.shape[1] != self.flattened_dim:
+                print('oh no! output.shape[2] is not equal to flattened_dim')
+
+            output = output.permute(0, 3, 1, 2)
+            output = torch.flatten(output, start_dim=2)
+            output = self.linear(output)
+
+            if output.shape[1] == 1:
+                output = output.squeeze(1)
+                
+            return output
     
-    # final linear layer to get desired output dimension
-    layers.append(nn.Flatten())
-    layers.append(nn.Linear(hidden_dim, output_dim))
-    
-    return nn.Sequential(*layers)
+    return ConvEncoder(conv_layers, flattened_dim, output_dim)
 
 
 class Zeros(nn.Module):
@@ -142,6 +175,7 @@ class StructuredEncoder(nn.Module):
         super(StructuredEncoder, self).__init__()
         self.deterministic = deterministic
         self.encoder_type = encoder_type
+        self.linear_encoding = linear_encoding
         
         if linear_encoding:
             self._mean = nn.Linear(input_dim, output_dim)
@@ -149,7 +183,7 @@ class StructuredEncoder(nn.Module):
             if encoder_type == 'mlp':
                 self._mean = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=None)
             elif encoder_type == 'conv':
-                self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None, 
+                self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None,
                             kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
                 raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
@@ -160,7 +194,7 @@ class StructuredEncoder(nn.Module):
             if encoder_type == 'mlp':
                 self._logvars = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=T)
             elif encoder_type == 'conv':
-                self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T, 
+                self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T,
                                 kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
                 raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
@@ -168,7 +202,7 @@ class StructuredEncoder(nn.Module):
     def forward(self, x):
         # handle input shape for conv vs mlp
         if self.encoder_type == 'conv' and not self.linear_encoding:
-            # for conv, input should be (batch, features, time)
+            # for conv, input should be (batch, 1, features, time))
             x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear encoding, no shape transformation needed
@@ -176,7 +210,7 @@ class StructuredEncoder(nn.Module):
             
         encoded_mean = self._mean(x_processed)
         if self.deterministic:
-            encoded_vars = self._logvars(encoded_mean.shape)
+            encoded_vars = torch.exp(self._logvars(encoded_mean.shape))
         else:
             encoded_vars = torch.exp(self._logvars(x_processed))
             # encoded_vars = nn.functional.softplus(self._logvars(x_processed))
@@ -200,10 +234,17 @@ class StructuredEncoder(nn.Module):
         return self._mean(x_processed)
 
     def reshape_for_conv(self, x):
-        if len(x.shape) == 3:  # (batch, time, features)
-            x_processed = x.transpose(1, 2)  # (batch, features, time)
-        else:  # (batch, features) - need to add time dim
-            x_processed = x.unsqueeze(-1)  # (batch, features, 1)
+        # takes in x as (batch, time, features) or (batch, features)
+        # if x is (batch, features), add time dim of 1
+        # return x_processed as (batch, 1, features, time) for conv
+        if x.ndim == 2:
+            x_processed = x.unsqueeze(1)
+        else:
+            x_processed = x
+        
+        x_processed = x_processed.permute(0, 2, 1)
+        x_processed = x_processed.unsqueeze(1)
+        
         return x_processed
 
 def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):
@@ -465,6 +506,9 @@ def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_
             # if torch.isnan(loss):
             #     model(x_past_batch, x_future_batch, debug=True)
             loss.backward()
+            # add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             # check if gradients are nan
             grad_bool = True
             for name, param in model.named_parameters():
