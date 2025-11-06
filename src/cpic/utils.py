@@ -104,6 +104,8 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
             output = torch.flatten(output, start_dim=2)
             output = self.linear(output)
 
+            # output shape: (batch, T, output_dim)
+            # if T is 1, change output to (batch, output_dim)
             if output.shape[1] == 1:
                 output = output.squeeze(1)
                 
