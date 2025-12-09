@@ -7,3 +7,5 @@ tensor_logs/*
 dist/*
 *.pyc
 .venv/*
+.DS_Store
+res/*
