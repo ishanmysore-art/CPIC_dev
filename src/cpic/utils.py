@@ -117,7 +117,7 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
 
         ''' commented out things that were needed for mean pooling implementation. can be used later for testing & comparing with mean pooling
         perhaps also add a flag to ConvEncoder class  to toggle between flattening/mean pooling
-        
+
         self.final_num_features = final_num_features
 
         mean pool over the channel dim
@@ -127,66 +127,54 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
     
     return ConvEncoder(conv_layers, flattened_dim, output_dim)
 
+def _extract_conv_layers(module):
+    """extract all Conv2d layers from a module."""
+    layers = []
+    for m in module.modules():
+        if isinstance(m, nn.Conv2d):
+            layers.append(m)
+    return layers
+
+def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
+    """visualize kernels for a single Conv2d layer."""
+    kernels = layer.weight.detach().clone().cpu()
+    kernels = kernels.mean(dim =1, keepdim=True)
+    
+    print(kernels.size())
+    kernels = kernels - kernels.min()
+    if kernels.max() != 0:
+        kernels = torch.abs(kernels / kernels.max())
+    
+    filter_img = torchvision.utils.make_grid(kernels, nrow=8)
+    # Take first channel only to get 2D array for colormap
+    filter_img_2d = filter_img[0, :, :]
+    plt.imshow(filter_img_2d, cmap='gist_gray')
+    plt.colorbar()
+    
+    plt.title(f'{type} Layer {layer_idx} - {kernels.shape[0]} filters')
+    
+    plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
+    plt.close()
 
 def visualize_conv_kernels(model, save_dir=None):
     encoder = model.encoder
     if encoder.encoder_type != 'conv' or encoder.linear_encoding:
-        print('not using conv encoder.')
-        return None
+        raise ValueError(f"Encoder is not a conv encoder or is using linear encoding. encoder_type: {encoder.encoder_type}, linear_encoding: {encoder.linear_encoding}")
     
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
-    mean_encoder = encoder._mean
-
-    mean_layers = []
-
-    for module in mean_encoder.modules():
-        if isinstance(module, nn.Conv2d):
-            mean_layers.append(module)
-
+    # visualize mean encoder layers
+    mean_layers = _extract_conv_layers(encoder._mean)
     for idx, layer in enumerate(mean_layers):
-            kernels = layer.weight.detach().clone().cpu()
-
-            kernels = kernels.mean(dim=1, keepdim=True)
-
-            print(kernels.size())
-            kernels = kernels - kernels.min()
-            if kernels.max() != 0:
-                kernels = torch.abs(kernels / kernels.max())
-            filter_img = torchvision.utils.make_grid(kernels, nrow=8)
-            # Take first channel only to get 2D array for colormap
-            filter_img_2d = filter_img[0, :, :]
-            plt.imshow(filter_img_2d, cmap='gist_gray')
-            plt.colorbar()
-            plt.title(f'Mean Encoder Layer {idx} - {kernels.shape[0]} filters')
-            img = plt.savefig(save_dir + '/mean_kernel_layer_{}.png'.format(idx))
-            plt.close()
+        _visualize_kernel_layer(layer, idx, save_dir, 'mean')
     
+    # visualize std encoder layers
     if not encoder.deterministic:
-        std_encoder = encoder._logvars
-        std_layers = []
-
-        for module in std_encoder.modules():
-            if isinstance(module, nn.Conv2d):
-                std_layers.append(module)
-
+        std_layers = _extract_conv_layers(encoder._logvars)
         for idx, layer in enumerate(std_layers):
-            kernels = layer.weight.detach().clone().cpu()
+            _visualize_kernel_layer(layer, idx, save_dir, 'std')
 
-            kernels = kernels.mean(dim=1, keepdim=True)
-
-            print(kernels.size())
-            kernels = kernels - kernels.min()
-            if kernels.max() != 0:
-                kernels = torch.abs(kernels / kernels.max())
-            filter_img = torchvision.utils.make_grid(kernels, nrow=8)
-            # Take first channel only to get 2D array for colormap
-            filter_img_2d = filter_img[0, :, :]
-            plt.imshow(filter_img_2d, cmap='gist_gray')
-            plt.colorbar()
-            img = plt.savefig(save_dir + '/std_kernel_layer_{}.png'.format(idx))
-            plt.close()
 
 class Zeros(nn.Module):
     def __init__(self, device="cuda:0"):
