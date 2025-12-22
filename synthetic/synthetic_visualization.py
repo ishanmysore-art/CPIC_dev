@@ -2,7 +2,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 
-num_init = 2
+num_init = 4
 
 # collect the CPIC data.
 R2_CPICs = list()

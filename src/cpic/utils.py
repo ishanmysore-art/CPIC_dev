@@ -4,6 +4,9 @@ import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
+import torchvision
+import matplotlib.pyplot as plt
+import os
 import dca as DCA
 
 
@@ -52,7 +55,7 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
         padding: conv padding
     '''
     # input shape: (batch, 1, input_dim, length) - reshape_for_conv will handle this
-    if activation == 'relu':
+    if activation == 'relu':    
         activation_f = nn.ReLU()
     
     # helper function to compute output dimension of a conv layer
@@ -82,10 +85,10 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
     conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
     final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
 
+    # dimension of the flattened output of the conv layers (before the linear layer)
     flattened_dim = hidden_dim * final_num_features
-
     if flattened_dim < 0:
-        print('oh no! flattened_dim is negative')
+        raise ValueError(f"flattened_dim is negative: {flattened_dim}")
 
     class ConvEncoder(nn.Module):
         def __init__(self, conv_layers, flattened_dim, output_dim):
@@ -97,8 +100,9 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
 
         def forward(self, x):
             output = self.conv_seq(x)
+
             if output.shape[2] * output.shape[1] != self.flattened_dim:
-                print('oh no! output.shape[2] is not equal to flattened_dim')
+                raise ValueError(f"output.shape[2] * output.shape[1] != flattened_dim: {output.shape[2] * output.shape[1]} != {self.flattened_dim}")
 
             output = output.permute(0, 3, 1, 2)
             output = torch.flatten(output, start_dim=2)
@@ -110,9 +114,79 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
                 output = output.squeeze(1)
                 
             return output
+
+        ''' commented out things that were needed for mean pooling implementation. can be used later for testing & comparing with mean pooling
+        perhaps also add a flag to ConvEncoder class  to toggle between flattening/mean pooling
+        
+        self.final_num_features = final_num_features
+
+        mean pool over the channel dim
+        output = torch.mean(output, dim=1) # now (batch, final_num_features, T)
+        output = output.permute(0, 2, 1) # now (batch, T, final_num_features)
+        '''
     
     return ConvEncoder(conv_layers, flattened_dim, output_dim)
 
+
+def visualize_conv_kernels(model, save_dir=None):
+    encoder = model.encoder
+    if encoder.encoder_type != 'conv' or encoder.linear_encoding:
+        print('not using conv encoder.')
+        return None
+    
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+
+    mean_encoder = encoder._mean
+
+    mean_layers = []
+
+    for module in mean_encoder.modules():
+        if isinstance(module, nn.Conv2d):
+            mean_layers.append(module)
+
+    for idx, layer in enumerate(mean_layers):
+            kernels = layer.weight.detach().clone().cpu()
+
+            kernels = kernels.mean(dim=1, keepdim=True)
+
+            print(kernels.size())
+            kernels = kernels - kernels.min()
+            if kernels.max() != 0:
+                kernels = torch.abs(kernels / kernels.max())
+            filter_img = torchvision.utils.make_grid(kernels, nrow=8)
+            # Take first channel only to get 2D array for colormap
+            filter_img_2d = filter_img[0, :, :]
+            plt.imshow(filter_img_2d, cmap='gist_gray')
+            plt.colorbar()
+            plt.title(f'Mean Encoder Layer {idx} - {kernels.shape[0]} filters')
+            img = plt.savefig(save_dir + '/mean_kernel_layer_{}.png'.format(idx))
+            plt.close()
+    
+    if not encoder.deterministic:
+        std_encoder = encoder._logvars
+        std_layers = []
+
+        for module in std_encoder.modules():
+            if isinstance(module, nn.Conv2d):
+                std_layers.append(module)
+
+        for idx, layer in enumerate(std_layers):
+            kernels = layer.weight.detach().clone().cpu()
+
+            kernels = kernels.mean(dim=1, keepdim=True)
+
+            print(kernels.size())
+            kernels = kernels - kernels.min()
+            if kernels.max() != 0:
+                kernels = torch.abs(kernels / kernels.max())
+            filter_img = torchvision.utils.make_grid(kernels, nrow=8)
+            # Take first channel only to get 2D array for colormap
+            filter_img_2d = filter_img[0, :, :]
+            plt.imshow(filter_img_2d, cmap='gist_gray')
+            plt.colorbar()
+            img = plt.savefig(save_dir + '/std_kernel_layer_{}.png'.format(idx))
+            plt.close()
 
 class Zeros(nn.Module):
     def __init__(self, device="cuda:0"):
@@ -543,6 +617,11 @@ def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_
 
         print('epoch', epoch, 'loss', np.mean(loss_by_epoch), 'I_compress_bound', np.mean(I_compress_bound_by_epoch),
               'I_predictive_bound', np.mean(I_predictive_bound_by_epoch))
+
+    if encoder_type == 'conv' and not linear_encoding: 
+        kernel_save_dir = f"kernel_visualizations/{signiture}"
+        print('visualizing kernels...')
+        visualize_conv_kernels(model, kernel_save_dir)
 
     if return_mutual_information:
         return model, np.mean(I_compress_bound_by_epoch), np.mean(I_predictive_bound_by_epoch)

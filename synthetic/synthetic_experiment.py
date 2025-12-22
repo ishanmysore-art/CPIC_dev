@@ -197,11 +197,18 @@ if __name__ == "__main__":
             init_weights = DCA_init(X_noisy, T=T, d=ydim, rng_or_seed=args.seed)
         else:
             init_weights = None
+        # Create kernel save suffix with SNR and seed
+        if args.seed is not None:
+            kernel_suffix = f"seed_{args.seed}/snr_{snr_val:.4f}"
+        else:
+            kernel_suffix = f"snr_{snr_val:.4f}"
+        
         CPIC, loss = train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_dataloader,
                           signiture=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
                           num_early_stop=num_early_stop, device=device, predictive_space=predictive_space,
                           encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride,
-                          conv_padding=conv_padding, n_layers=n_layers, activation=activation, linear_encoding=linear_encoding)
+                          conv_padding=conv_padding, n_layers=n_layers, activation=activation, linear_encoding=linear_encoding, hidden_dim=hidden_dim,
+                          kernel_save_suffix=kernel_suffix)
         CPIC = CPIC.to(device)
         encoded_mean = CPIC.encode(torch.from_numpy(X_noisy).to(device))
         encoded_mean_np = encoded_mean.cpu().detach().numpy()

@@ -4,7 +4,7 @@ import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
 import os
-from .utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information
+from .utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information, visualize_conv_kernels
 
 
 class CPIC(nn.Module):
@@ -186,12 +186,12 @@ class CPIC(nn.Module):
 def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_loader, T=4, signiture=22,
                deterministic=False, linear_encoding=True, init_weights=None, num_early_stop=0, device="cuda:0", lr=1e-4, beta1=1, beta2=0,
                critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False,
-               encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1, n_layers=1, activation='relu'):
+               encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1, n_layers=1, activation='relu', hidden_dim=256, kernel_save_suffix=None):
     model = CPIC(xdim, ydim, mi_params, critic_params, baseline_params, T=T, beta=beta, beta1=beta1, beta2=beta2,
                  deterministic=deterministic, linear_encoding=linear_encoding, init_weights=init_weights, device=device, critic_params_YX=critic_params_YX,
                  predictive_space=predictive_space, regularization_weight=regularization_weight,
                  encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, 
-                 conv_padding=conv_padding, n_layers=n_layers, activation=activation)
+                 conv_padding=conv_padding, n_layers=n_layers, activation=activation, hidden_dim=hidden_dim)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     if init_weights is not None:
         do_init = True
@@ -253,6 +253,14 @@ def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_
 
         print('epoch', epoch, 'loss', np.mean(loss_by_epoch), 'I_compress_bound', np.mean(I_compress_bound_by_epoch),
               'I_predictive_bound', np.mean(I_predictive_bound_by_epoch))
+
+    if encoder_type == 'conv' and not linear_encoding: 
+        if kernel_save_suffix is not None:
+            kernel_save_dir = f"kernel_visualizations/{signiture}/{kernel_save_suffix}"
+        else:
+            kernel_save_dir = f"kernel_visualizations/{signiture}"
+        print(f'Visualizing kernels to {kernel_save_dir}...')
+        visualize_conv_kernels(model, kernel_save_dir)
 
     if return_mutual_information:
         return model, np.mean(I_compress_bound_by_epoch), np.mean(I_predictive_bound_by_epoch)
