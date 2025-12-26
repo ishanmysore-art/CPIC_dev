@@ -272,8 +272,6 @@ class CPIC(nn.Module):
             Learning rate for the optimizer. The default is 1e-4.
         early_stop : int, optional
             Early stopping patience. The default is 10.
-        init_weights : bool, optional
-            Whether to initialize weights. The default is False.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
         """
@@ -283,7 +281,7 @@ class CPIC(nn.Module):
         best_loss = np.inf
         no_improve = 0 # counter for early stopping
 
-        if init_weights is not None:
+        if self.init_weights is not None:
             do_init = True
             optimizer_init = torch.optim.Adam(list(self.critic.parameters()), lr=lr)
         else:
@@ -320,14 +318,18 @@ class CPIC(nn.Module):
                 I_predictive_bounds.append(I_predictive_bound.item())
             
             mean_loss = np.mean(losses)
+            mean_I_compress = np.mean(I_compress_bounds)
+            mean_I_predictive = np.mean(I_predictive_bounds)
             if writer:
                 writer.add_scalar("loss", mean_loss, global_step=epoch)
-                writer.add_scalar("I_compress", np.mean(I_compress_bounds), global_step=epoch)
-                writer.add_scalar("I_predictive", np.mean(I_predictive_bounds), global_step=epoch)
-            print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={np.mean(I_compress_bounds):.4f}, I_predictive_bound={np.mean(I_predictive_bounds):.4f}")
+                writer.add_scalar("I_compress", mean_I_compress, global_step=epoch)
+                writer.add_scalar("I_predictive", mean_I_predictive, global_step=epoch)
+            print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}")
 
             if mean_loss < best_loss:
                 best_loss = mean_loss
+                best_I_compress = mean_I_compress
+                best_I_predictive = mean_I_predictive
                 no_improve = 0
             else:
                 no_improve += 1
@@ -335,7 +337,7 @@ class CPIC(nn.Module):
                     print("Early stopping...")
                     break
 
-        return self
+        return best_loss, best_I_compress, best_I_predictive
 
 
     def transform(self, X):
