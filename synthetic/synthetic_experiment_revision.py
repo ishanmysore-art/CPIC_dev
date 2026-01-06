@@ -138,7 +138,7 @@ if __name__ == "__main__":
     else:
         device = args.device
 
-    signiture=22
+    signature=22
 
     # load data
     with h5py.File(RESULTS_FILENAME, "r") as f:
@@ -179,7 +179,7 @@ if __name__ == "__main__":
                               batch_size=batch_size, 
                               lr=lr, 
                               early_stop=num_early_stop, 
-                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signiture)))
+                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
                     
         encoded_mean = CPIC.encode(torch.from_numpy(X_noisy).to(device))
         X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)

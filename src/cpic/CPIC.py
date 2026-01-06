@@ -3,11 +3,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 import numpy as np
 import tqdm
-from cpic.utils import (StructuredEncoder, 
-                        CRITICS, 
-                        BASELINES, 
-                        estimate_mutual_information
-                        )
+from tensorboardX import SummaryWriter
+import os
+from .utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information, visualize_conv_kernels
 
 
 class CPIC(nn.Module):
@@ -157,12 +155,10 @@ class CPIC(nn.Module):
         else:
             self.baseline = BASELINES[mi_params.get('baseline', 'constant')](input_dim=self.T * self.ydim, **baseline_params)
             self.baseline.to(device)
-
         # initialize critic for I_YX
         if self.beta2 > 0:
             self.critic_YX = CRITICS[mi_params.get('critic', 'concat')](**critic_params_YX)
             self.critic_YX.to(device)
-
         self.mi_params = mi_params
         self.device=device
         self.regularization_weight=regularization_weight
@@ -256,7 +252,8 @@ class CPIC(nn.Module):
         return encoded_mean
 
 
-    def fit(self, X, epochs=100, batch_size=64, lr=1e-4, early_stop=10, init_weights=False, writer=None):
+    def fit(self, X, epochs=100, batch_size=64, lr=1e-4, early_stop=10, init_weights=False, writer=None, 
+            kernel_save_suffix=None, signature=None):
         """
         Fit the CPIC model to the data X.
 
@@ -274,6 +271,10 @@ class CPIC(nn.Module):
             Early stopping patience. The default is 10.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
+        kernel_save_suffix : str, optional
+            Optional suffix for kernel visualization directory. The default is None.
+        signature : str or int, optional
+            Signature/identifier for kernel visualization directory. The default is None.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
@@ -336,6 +337,21 @@ class CPIC(nn.Module):
                 if no_improve >= early_stop:
                     print("Early stopping...")
                     break
+
+        # Visualize convolutional kernels if using conv encoder
+        if self.encoder.encoder_type == 'conv' and not self.encoder.linear_encoding:
+            if signature is not None:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = f"kernel_visualizations/{signature}"
+            else:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = "kernel_visualizations"
+            print(f'Visualizing kernels to {kernel_save_dir}...')
+            visualize_conv_kernels(self, kernel_save_dir)
 
         return best_loss, best_I_compress, best_I_predictive
 

@@ -1,8 +1,13 @@
 import torch
 from torch import nn
 import numpy as np
-from torch.utils.data import Dataset
-from dca import DynamicalComponentsAnalysis as DCA
+import tqdm
+from tensorboardX import SummaryWriter
+from torch.utils.data import DataLoader, Dataset
+import torchvision
+import matplotlib.pyplot as plt
+import os
+import dca as DCA
 
 
 def KL_between_normals(q_distr, p_distr):
@@ -34,6 +39,141 @@ def mlp(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
             layers += [nn.Linear(hidden_dim, hidden_dim), nn.BatchNorm1d(T), activation_f]
     layers += [nn.Linear(hidden_dim, output_dim)]
     return nn.Sequential(*layers)
+
+   
+def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
+    '''
+    2D convolutional encoder that convolves over features
+        input_dim: input feature dimension (xdim)
+        hidden_dim: num channels in hidden layers & output layer
+        output_dim: output feature dimension (ydim)
+        n_hidden_layers: number of hidden layers (there are 2 conv layers + 1 linear layer by default)
+        activation: activation function (relu by default)
+        T: time window    
+        kernel_size: conv kernel size (applied over feature dimension with kernel_height)
+        stride: conv stride
+        padding: conv padding
+    '''
+    # input shape: (batch, 1, input_dim, length) - reshape_for_conv will handle this
+    if activation == 'relu':    
+        activation_f = nn.ReLU()
+    
+    # helper function to compute output dimension of a conv layer
+    # will let us figure out the final size of input to the linear layer
+    def conv_output_dim(input_dim, kernel_size, stride, padding):
+        return (input_dim + (2 * padding) - kernel_size) // stride + 1
+    
+    conv_layers = []
+
+    # first conv layer: in_channels=1, out_channels=hidden_dim
+    # kernel_size=(kernel_size, 1) to convolve over feature dimension with kernel_height
+    conv_layers.append(nn.Conv2d(1, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+    final_num_features = conv_output_dim(input_dim, kernel_size, stride, padding)
+
+    # batchnorm regardless of T to ensure stability
+    conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+    conv_layers.append(activation_f)
+    
+    for _ in range(n_hidden_layers):
+        conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+        final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
+
+        # batchnorm regardless of T to ensure stability
+        conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+        conv_layers.append(activation_f)
+    
+    conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+    final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
+
+    # dimension of the flattened output of the conv layers (before the linear layer)
+    flattened_dim = hidden_dim * final_num_features
+    if flattened_dim < 0:
+        raise ValueError(f"flattened_dim is negative: {flattened_dim}")
+
+    class ConvEncoder(nn.Module):
+        def __init__(self, conv_layers, flattened_dim, output_dim):
+            super().__init__()
+            self.conv_seq = nn.Sequential(*conv_layers)
+            self.flattened_dim = flattened_dim
+            self.output_dim = output_dim
+            self.linear = nn.Linear(self.flattened_dim, self.output_dim)
+
+        def forward(self, x):
+            output = self.conv_seq(x)
+
+            if output.shape[2] * output.shape[1] != self.flattened_dim:
+                raise ValueError(f"output.shape[2] * output.shape[1] != flattened_dim: {output.shape[2] * output.shape[1]} != {self.flattened_dim}")
+
+            output = output.permute(0, 3, 1, 2)
+            output = torch.flatten(output, start_dim=2)
+            output = self.linear(output)
+
+            # output shape: (batch, T, output_dim)
+            # if T is 1, change output to (batch, output_dim)
+            if output.shape[1] == 1:
+                output = output.squeeze(1)
+                
+            return output
+
+        ''' commented out things that were needed for mean pooling implementation. can be used later for testing & comparing with mean pooling
+        perhaps also add a flag to ConvEncoder class  to toggle between flattening/mean pooling
+
+        self.final_num_features = final_num_features
+
+        mean pool over the channel dim
+        output = torch.mean(output, dim=1) # now (batch, final_num_features, T)
+        output = output.permute(0, 2, 1) # now (batch, T, final_num_features)
+        '''
+    
+    return ConvEncoder(conv_layers, flattened_dim, output_dim)
+
+def _extract_conv_layers(module):
+    """extract all Conv2d layers from a module."""
+    layers = []
+    for m in module.modules():
+        if isinstance(m, nn.Conv2d):
+            layers.append(m)
+    return layers
+
+def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
+    """visualize kernels for a single Conv2d layer."""
+    kernels = layer.weight.detach().clone().cpu()
+    kernels = kernels.mean(dim =1, keepdim=True)
+    
+    print(kernels.size())
+    kernels = kernels - kernels.min()
+    if kernels.max() != 0:
+        kernels = torch.abs(kernels / kernels.max())
+    
+    filter_img = torchvision.utils.make_grid(kernels, nrow=8)
+    # Take first channel only to get 2D array for colormap
+    filter_img_2d = filter_img[0, :, :]
+    plt.imshow(filter_img_2d, cmap='gist_gray')
+    plt.colorbar()
+    
+    plt.title(f'{type} Layer {layer_idx} - {kernels.shape[0]} filters')
+    
+    plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
+    plt.close()
+
+def visualize_conv_kernels(model, save_dir=None):
+    encoder = model.encoder
+    if encoder.encoder_type != 'conv' or encoder.linear_encoding:
+        raise ValueError(f"Encoder is not a conv encoder or is using linear encoding. encoder_type: {encoder.encoder_type}, linear_encoding: {encoder.linear_encoding}")
+    
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # visualize mean encoder layers
+    mean_layers = _extract_conv_layers(encoder._mean)
+    for idx, layer in enumerate(mean_layers):
+        _visualize_kernel_layer(layer, idx, save_dir, 'mean')
+    
+    # visualize std encoder layers
+    if not encoder.deterministic:
+        std_layers = _extract_conv_layers(encoder._logvars)
+        for idx, layer in enumerate(std_layers):
+            _visualize_kernel_layer(layer, idx, save_dir, 'std')
 
 
 def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
@@ -170,47 +310,38 @@ class UnnormalizedBaseline(nn.Module):
 
 
 class StructuredEncoder(nn.Module):
-    def __init__(
-            self, 
-            input_dim, hidden_dim, output_dim,
-            T=4,
-            device="cuda:0", 
-            deterministic=False,
-            linear_encoder=False,
-            nonlinear_encoder_type="mlp",
-            n_layers=1, activation='relu', 
-            conv_kernel_size=3, conv_stride=1, conv_padding=1,
-            ):
+    def __init__(self, input_dim, hidden_dim, output_dim, T=4, n_layers=1, activation='relu', deterministic=False, device="cuda:0", linear_encoding=True, 
+                encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1):
         super(StructuredEncoder, self).__init__()
         self.deterministic = deterministic
-        self.linear_enoder = linear_encoder
-        self.nonlinear_encoder_type = nonlinear_encoder_type
-
-        if linear_encoder:
+        self.encoder_type = encoder_type
+        self.linear_encoding = linear_encoding
+        
+        if linear_encoding:
             self._mean = nn.Linear(input_dim, output_dim)
         else:
-            if nonlinear_encoder_type == "mlp":
+            if encoder_type == 'mlp':
                 self._mean = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=None)
-            elif nonlinear_encoder_type == "conv":
+            elif encoder_type == 'conv':
                 self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None,
                             kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
-                raise ValueError(f"Unknown nonlinear_encoder_type: {nonlinear_encoder_type}. Must be 'mlp' or 'conv'.")
-
+                raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
+                
         if deterministic:
             self._logvars = Zeros(device=device)
         else:
-            if nonlinear_encoder_type == "mlp":
+            if encoder_type == 'mlp':
                 self._logvars = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=T)
-            elif nonlinear_encoder_type == "conv":
+            elif encoder_type == 'conv':
                 self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T,
-                            kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
+                                kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
             else:
-                raise ValueError(f"Unknown nonlinear_encoder_type: {nonlinear_encoder_type}. Must be 'mlp' or 'conv'.")
+                raise ValueError(f"Unknown encoder_type: {encoder_type}. Must be 'mlp' or 'conv'")
 
     def forward(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self.encoder_type == 'conv' and not self.linear_encoding:
             # for conv, input should be (batch, 1, features, time))
             x_processed = self.reshape_for_conv(x)
         else:
@@ -227,7 +358,7 @@ class StructuredEncoder(nn.Module):
 
     def get_logvars(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self.encoder_type == 'conv' and not self.linear_encoding:
             x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear, no shape transformation needed
@@ -236,7 +367,7 @@ class StructuredEncoder(nn.Module):
 
     def get_mean(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self.encoder_type == 'conv' and not self.linear_encoding:
             x_processed = self.reshape_for_conv(x)
         else:
             x_processed = x
@@ -317,7 +448,7 @@ def mine_lower_bound(scores, device='cuda:0'):
     return tuba_lower_bound(scores, device=device)
 
 
-def infonce_upper_bound(scores, device='cuda:0'):
+def infonec_upper_bound(scores, device='cuda:0'):
     '''Bound from Van Den Oord and al. (2018)
     scores are either known log conditional distribution log p(y|x) or critic function f(x,y).
     '''
@@ -328,7 +459,7 @@ def infonce_upper_bound(scores, device='cuda:0'):
 def infonce_lower_bound(scores):
     '''Bound from Van Den Oord and al. (2018)'''
     nll = torch.mean(torch.diag(scores) - torch.logsumexp(scores,dim=1))
-    k = scores.size()[0]
+    k =scores.size()[0]
     mi = np.log(k) + nll
     return mi
 
@@ -369,7 +500,7 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
     if estimator == 'infonce_lower':
         mi = infonce_lower_bound(scores)
     elif estimator == "infonce_upper":
-        mi = infonce_upper_bound(scores, device=device)
+        mi = infonec_upper_bound(scores, device=device)
     elif estimator == "vub":
         mi = vub_upper_bound(decoded_mean, decoded_vars, device=device)
     elif estimator == "nwj":
@@ -384,12 +515,182 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
     return mi
 
 
+class CPIC(nn.Module):
+    def __init__(self, xdim, ydim, mi_params, critic_params, baseline_params, T=4, beta=1e-3, beta1=1, beta2=1, hidden_dim=256,
+                 deterministic=False, linear_encoding=True, init_weights=None, device='cuda:0', critic_params_YX=None, predictive_space="latent",
+                 regularization_weight=0, encoder_type='mlp', conv_kernel_size=3, conv_stride=1, conv_padding=1):
+        super(CPIC, self).__init__()
+
+        self.predictive_space = predictive_space
+        self.beta = beta
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.xdim = xdim
+        self.ydim = ydim
+        self.T = T
+        self.deterministic = deterministic
+        self.linear_encoding = linear_encoding
+        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, T=self.T, deterministic=deterministic, device=device, linear_encoding=linear_encoding, 
+                                        encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, conv_padding=conv_padding)
+        self.encoder.to(device)
+        # initialize critic and baseline for I_compress, I_predictive
+        if init_weights is not None:
+            self.encoder._mean.weight = torch.nn.parameter.Parameter(torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(device))
+        self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
+        self.critic.to(device)
+        if mi_params.get('baseline', 'constant') == "constant":
+            self.baseline = BASELINES[mi_params.get('baseline', 'constant')]()
+        else:
+            self.baseline = BASELINES[mi_params.get('baseline', 'constant')](input_dim=self.T * self.ydim, **baseline_params)
+            self.baseline.to(device)
+        # initialize critic for I_YX
+        if self.beta2 > 0:
+            self.critic_YX = CRITICS[mi_params.get('critic', 'concat')](**critic_params_YX)
+            self.critic_YX.to(device)
+        self.mi_params = mi_params
+        self.device=device
+        self.regularization_weight=regularization_weight
+
+    def forward(self, x_past, x_future, debug=False):
+        batch_size = x_past.shape[0]
+        encoded_past_mean, encoded_past_vars = self.encoder(x_past)
+        encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
+                       torch.randn(*encoded_past_mean.size()).to(self.device)
+        encoded_past_reshaped = encoded_past.reshape(batch_size, -1)
+        encoded_future_mean, encoded_future_vars = self.encoder(x_future)
+        encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
+                       torch.randn(*encoded_future_mean.size()).to(self.device)
+        encoded_future_reshaped = encoded_future.reshape(batch_size, -1)
+        future_reshaped = x_future.reshape(batch_size, -1)
+
+        if self.deterministic:
+            I_compress_bound = torch.tensor([0]).to(self.device)
+        else:
+            I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], x_past,
+                                                           encoded_past_reshaped, decoder=self.encoder, device=self.device)
+        if self.predictive_space == "latent":
+             I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
+                                                              encoded_past_reshaped,
+                                                              encoded_future_reshaped, critic_fn=self.critic,
+                                                              baseline_fn=self.baseline, device=self.device)
+        elif self.predictive_space == "observation":
+            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
+                                                             encoded_past_reshaped,
+                                                             future_reshaped, critic_fn=self.critic,
+                                                             baseline_fn=self.baseline, device=self.device)
+        else:
+            raise ValueError('The predictive space is not specified.')
+
+        if self.beta2 > 0:
+            I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
+                                                 future_reshaped, critic_fn=self.critic_YX, device=self.device)
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+        else:
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
+
+        if self.regularization_weight > 0:
+            weight = self.encoder._mean.weight
+            L = L + self.regularization_weight * torch.sum(torch.abs(weight)) / torch.norm(weight)
+            # L = L + self.regularization_weight * torch.norm(weight, p='nuc') / torch.norm(weight)
+            print(torch.sum(torch.abs(weight)) / torch.norm(weight))
+            print(weight)
+        # print(debug)
+        if debug:
+            estimate_mutual_information(self.mi_params['estimator_compress'], x_past, encoded_past_reshaped,
+                                        decoder=self.encoder, device=self.device, debug=debug)
+        return L, I_compress_bound, I_predictive_bound
+
+    def encode(self, x):
+        encoded_mean = self.encoder.get_mean(x)
+        return encoded_mean
+
+
 def DCA_init(X, T, d, n_init=1, rng_or_seed=None):
-    opt = DCA(T=T, rng_or_seed=rng_or_seed)
+    opt = DCA.DynamicalComponentsAnalysis(T=T, rng_or_seed=rng_or_seed)
     opt.estimate_data_statistics(X)
     opt.fit_projection(d=d, n_init=n_init)
     V_dca = opt.coef_
     return V_dca
+
+
+def train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_loader, T=4, signature=22,
+               deterministic=False, linear_encoding=True, init_weights=None, num_early_stop=0, device="cuda:0", lr=1e-4, beta1=1, beta2=0,
+               critic_params_YX=None, predictive_space="latent", regularization_weight=0, return_mutual_information=False, encoder_type='mlp',
+               conv_kernel_size=3, conv_stride=1, conv_padding=1):
+    model = CPIC(xdim, ydim, mi_params, critic_params, baseline_params, T=T, beta=beta, beta1=beta1, beta2=beta2,
+                 deterministic=deterministic, linear_encoding=linear_encoding, init_weights=init_weights, device=device, critic_params_YX=critic_params_YX,
+                 predictive_space=predictive_space, regularization_weight=regularization_weight, encoder_type=encoder_type,
+                 conv_kernel_size=conv_kernel_size, conv_stride=conv_stride, conv_padding=conv_padding)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    if init_weights is not None:
+        do_init = True
+        opt_init = torch.optim.Adam(list(model.critic.parameters()), lr=lr)
+    else:
+        do_init = False
+
+    writer = SummaryWriter(log_dir="tensor_logs/{}".format(signature))
+
+    if num_early_stop > 0:
+        curr_loss = np.infty
+
+    # torch.autograd.set_detect_anomaly(True)
+    for epoch in tqdm.tqdm(range(num_epochs)):
+        loss_by_epoch = []
+        I_compress_bound_by_epoch = []
+        I_predictive_bound_by_epoch = []
+
+        for x_past_batch, x_future_batch in train_loader:
+            x_past_batch = x_past_batch.to(torch.float).to(device)
+            x_future_batch = x_future_batch.to(torch.float).to(device)
+            loss, I_compress_bound, I_predictive_bound = model(x_past_batch, x_future_batch)
+            # if torch.isnan(loss):
+            #     model(x_past_batch, x_future_batch, debug=True)
+            loss.backward()
+            # add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+            # check if gradients are nan
+            grad_bool = True
+            for name, param in model.named_parameters():
+                if not torch.isfinite(param.grad).all():
+                    print(epoch, name, torch.isfinite(param.grad).all())
+                    grad_bool = False
+                    break
+            if not grad_bool:
+                break
+            if do_init and epoch < (num_epochs/4):
+                opt_init.step()
+                opt_init.zero_grad()
+            else:
+                opt.step()
+                opt.zero_grad()
+
+            I_compress_bound_by_epoch.append(I_compress_bound.item())
+            I_predictive_bound_by_epoch.append(I_predictive_bound.item())
+            loss_by_epoch.append(loss.item())
+
+        if num_early_stop > 0 and (epoch+1) % num_early_stop == 0:
+            if np.mean(loss_by_epoch) < curr_loss:
+                curr_loss = np.mean(loss_by_epoch)
+            else:
+                break
+
+        writer.add_scalar("loss", np.mean(loss_by_epoch), global_step=epoch)
+        writer.add_scalar("I_compress", np.mean(I_compress_bound_by_epoch), global_step=epoch)
+        writer.add_scalar("I_predictive", np.mean(I_predictive_bound_by_epoch), global_step=epoch)
+
+        print('epoch', epoch, 'loss', np.mean(loss_by_epoch), 'I_compress_bound', np.mean(I_compress_bound_by_epoch),
+              'I_predictive_bound', np.mean(I_predictive_bound_by_epoch))
+
+    if encoder_type == 'conv' and not linear_encoding: 
+        kernel_save_dir = f"kernel_visualizations/{signature}"
+        print('visualizing kernels...')
+        visualize_conv_kernels(model, kernel_save_dir)
+
+    if return_mutual_information:
+        return model, np.mean(I_compress_bound_by_epoch), np.mean(I_predictive_bound_by_epoch)
+    else:
+        return model, np.mean(loss_by_epoch)
 
 
 def Polynomial_expand(x):
@@ -426,7 +727,7 @@ class PastFutureDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.past_ts[idx], self.future_ts[idx]
-    
+
 
 if __name__ == "__main__":
     pass
