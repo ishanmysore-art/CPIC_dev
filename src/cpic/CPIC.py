@@ -339,7 +339,7 @@ class CPIC(nn.Module):
                     break
 
         # Visualize convolutional kernels if using conv encoder
-        if self.encoder.encoder_type == 'conv' and not self.encoder.linear_encoding:
+        if self.encoder.nonlinear_encoder_type == 'conv' and not self.encoder.linear_encoder:
             if signature is not None:
                 if kernel_save_suffix is not None:
                     kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"

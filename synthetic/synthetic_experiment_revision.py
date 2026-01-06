@@ -121,9 +121,28 @@ if __name__ == "__main__":
         critic_params = {"x_dim": T * ydim, "y_dim": T * xdim, "hidden_dim": hidden_dim}
     baseline_params = {"hidden_dim": hidden_dim}
     deterministic = cfg.getboolean('Hyperparameters', 'deterministic')
-    encoder_params = {"deterministic": deterministic, "linear_encoder": False, 
-                      "nonlinear_encoder_type": "mlp", "n_layers": 1, "activation": "relu", 
-                      "conv_kernel_size": 3, "conv_stride": 1, "conv_padding": 1} 
+    
+    # read encoder parameters from config
+    linear_encoder = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else False
+    encoder_type = cfg.get('Hyperparameters', 'encoder_type') if cfg.has_option('Hyperparameters', 'encoder_type') else 'mlp'
+    n_layers = cfg.getint('Hyperparameters', 'n_layers') if cfg.has_option('Hyperparameters', 'n_layers') else 1
+    activation = cfg.get('Hyperparameters', 'activation') if cfg.has_option('Hyperparameters', 'activation') else 'relu'
+    
+    # conv-specific parameters
+    conv_kernel_size = cfg.getint('Hyperparameters', 'conv_kernel_size') if cfg.has_option('Hyperparameters', 'conv_kernel_size') else 3
+    conv_stride = cfg.getint('Hyperparameters', 'conv_stride') if cfg.has_option('Hyperparameters', 'conv_stride') else 1
+    conv_padding = cfg.getint('Hyperparameters', 'conv_padding') if cfg.has_option('Hyperparameters', 'conv_padding') else 1
+    
+    encoder_params = {
+        "deterministic": deterministic,
+        "linear_encoder": linear_encoder,
+        "nonlinear_encoder_type": encoder_type,
+        "n_layers": n_layers,
+        "activation": activation,
+        "conv_kernel_size": conv_kernel_size,
+        "conv_stride": conv_stride,
+        "conv_padding": conv_padding
+    } 
 
     # set training parameters
     do_vis_latent_trials = cfg.getboolean('Training', 'do_vis_latent_trials')
