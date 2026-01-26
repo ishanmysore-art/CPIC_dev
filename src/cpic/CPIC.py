@@ -22,38 +22,38 @@ class CPIC(nn.Module):
 
     Parameters
     ----------
-    xdim : int
-        Dimensionality of the input data.
-    ydim : int
-        Dimensionality of the output data.
-    mi_params : dict
+    xdim : int, optional
+        Dimensionality of the input data. If None, use the encoder to infer input dimension. The default is None.
+    ydim : int, optional
+        Dimensionality of the output data. Default is 3.
+    mi_params : dict, optional
         Parameters for mutual information estimation. A dictionary with keys:
             estimator_compress : str
-                Estimator for I_compress. One of ['infonce_lower', 'nwj_lower', 'tuba_lower'].
+                Estimator for I_compress. One of ['infonce_lower', 'nwj_lower', 'tuba_lower']. Default is 'infonce_lower'.
             estimator_predictive : str
-                Estimator for I_predictive. One of ['infonce_lower', 'nwj_lower', 'tuba_lower'].
+                Estimator for I_predictive. One of ['infonce_lower', 'nwj_lower', 'tuba_lower']. Default is 'infonce_lower'.
             critic : str
-                Critic type for mutual information estimation. One of ['separable', 'concat'].
+                Critic type for mutual information estimation. One of ['separable', 'concat']. Default is 'concat'.
             baseline : str
-                Baseline type for mutual information estimation. One of ['constant', 'unnormalized'].
-    critic_params : dict
+                Baseline type for mutual information estimation. One of ['constant', 'unnormalized']. Default is 'constant'.
+    critic_params : dict, optional
         Parameters for critic network for I_predictive. A dictionary with keys:
             x_dim : int
-                Input dimension for critic.
+                Input dimension for critic. Default is T * ydim.
             y_dim : int
-                Output dimension for critic.
+                Output dimension for critic. Default is T * ydim or T * xdim depending on predictive_space.
             hidden_dim : int
-                Hidden dimension for critic.
-    baseline_params : dict
+                Hidden dimension for critic. Default is 256.
+    baseline_params : dict, optional
         Parameters for baseline network for I_predictive. A dictionary with keys:
             hidden_dim : int
-                Hidden dimension for baseline.
+                Hidden dimension for baseline. Default is 256.
     encoder_params : dict, optional
         Parameters for encoder. A dictionary with keys:
             deterministic : bool
                 Whether to use deterministic encoder. Default is False.
             linear_encoder : bool
-                Whether to use linear encoder. Default is False.
+                Whether to use linear encoder. Default is True.
             nonlinear_encoder_type : str
                 Type of nonlinear encoder. One of ['mlp', 'conv']. Default is 'mlp'.
             n_layers : int
@@ -66,8 +66,6 @@ class CPIC(nn.Module):
                 Stride for convolutional encoder. Default is 1.
             conv_padding : int
                 Padding for convolutional encoder. Default is 1.
-    init_weights : np.ndarray, optional
-        Initial weights for the encoder mean layer. The default is None.
     critic_params_YX : dict, optional
         Parameters for critic network for I_YX. A dictionary with keys:
             x_dim : int
@@ -85,7 +83,7 @@ class CPIC(nn.Module):
     beta1 : float, optional
         Weight for predictive term I_predictive. The default is 1.
     beta2 : float, optional
-        Weight for I_YX term. The default is 1.
+        Weight for I_YX term. The default is 0.
     device : str, optional
         Device to use. The default is 'cuda:0'.
     predictive_space : str, optional
@@ -112,18 +110,17 @@ class CPIC(nn.Module):
     """
     
     def __init__(
-            self, 
-            xdim, 
-            ydim,
-            mi_params,
-            critic_params,
-            baseline_params,
-            encoder_params=None,
-            init_weights=None,
+            self,
+            xdim=None, 
+            ydim=3,
+            mi_params=None,
+            critic_params=None,
+            baseline_params=None,
+            encoder_params={},
             critic_params_YX=None,
             T=4,
             hidden_dim=256,
-            beta=1e-3, beta1=1.0, beta2=1.0,
+            beta=1e-3, beta1=1.0, beta2=0,
             device='cuda:0', 
             predictive_space="latent",
             regularization_weight=0
@@ -136,16 +133,25 @@ class CPIC(nn.Module):
         self.beta2 = beta2
         self.xdim = xdim
         self.ydim = ydim
+        self.hidden_dim = hidden_dim
         self.T = T
+        self.deterministic = encoder_params.get('deterministic', False)
+        self.linear_encoder = encoder_params.get('linear_encoder', True)
+        self.nonlinear_encoder_type = encoder_params.get('nonlinear_encoder_type', 'mlp')
+        self.n_layers = encoder_params.get('n_layers', 1)
+        self.activation = encoder_params.get('activation', 'relu')
+        self.conv_kernel_size = encoder_params.get('conv_kernel_size', 3)
+        self.conv_stride = encoder_params.get('conv_stride', 1)
+        self.conv_padding = encoder_params.get('conv_padding', 1)
 
-        self.encoder = StructuredEncoder(input_dim=xdim, output_dim=ydim, hidden_dim=hidden_dim, 
-                                         T=self.T, 
-                                         device=device,
-                                         **encoder_params).to(device)
-        if init_weights is not None:
-            self.encoder._mean.weight = torch.nn.parameter.Parameter(
-                torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(device))
-            
+        if mi_params is None:
+            mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
+                         'critic': 'concat', 'baseline': 'constant'}
+        if critic_params is None:
+            critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
+        if baseline_params is None:
+            baseline_params = {"hidden_dim": hidden_dim}
+
         # initialize critic and baseline for I_compress, I_predictive
         self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
         self.critic.to(device)
@@ -231,7 +237,6 @@ class CPIC(nn.Module):
             # L = L + self.regularization_weight * torch.norm(weight, p='nuc') / torch.norm(weight)
             print(torch.sum(torch.abs(weight)) / torch.norm(weight))
             print(weight)
-        # print(debug)
         if debug:
             estimate_mutual_information(self.mi_params['estimator_compress'], X_past, encoded_past_reshaped,
                                         decoder=self.encoder, device=self.device, debug=debug)
@@ -252,8 +257,7 @@ class CPIC(nn.Module):
         return encoded_mean
 
 
-    def fit(self, X, epochs=100, batch_size=64, lr=1e-4, early_stop=10, init_weights=False, writer=None, 
-            kernel_save_suffix=None, signature=None):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, kernel_save_suffix=None, signature=None):
         """
         Fit the CPIC model to the data X.
 
@@ -261,6 +265,8 @@ class CPIC(nn.Module):
         ----------
         X : PastFutureDataset
             Input data as a PastFutureDataset object. Contains past and future time-series data.
+        init_weights : np.ndarray, optional
+            Initial weights for the encoder mean layer. The default is None.
         epochs : int, optional
             Number of training epochs. The default is 100.
         batch_size : int, optional
@@ -278,9 +284,31 @@ class CPIC(nn.Module):
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
+        if self.xdim is None:
+            self.xdim = X[0][0].shape[-1]
+        self.encoder = StructuredEncoder(input_dim=self.xdim, output_dim=self.ydim, hidden_dim=self.hidden_dim, 
+                                         T=self.T, 
+                                         device=self.device,
+                                         deterministic=self.deterministic,
+                                         linear_encoder=self.linear_encoder,
+                                         nonlinear_encoder_type=self.nonlinear_encoder_type,
+                                         n_layers=self.n_layers,
+                                         activation=self.activation,
+                                         conv_kernel_size=self.conv_kernel_size,
+                                         conv_stride=self.conv_stride,
+                                         conv_padding=self.conv_padding)
+        self.encoder.to(self.device)
+        if init_weights is not None:
+            self.encoder._mean.weight = torch.nn.parameter.Parameter(
+                torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(self.device))
+        self.init_weights = init_weights
+
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_loss = np.inf
         no_improve = 0 # counter for early stopping
+        global_step = 0 # for tensorboard logging
+
+        stats = {"mean": np.mean, "std": np.std, "min": np.min, "max": np.max} # for mutual information bounds
 
         if self.init_weights is not None:
             do_init = True
@@ -289,7 +317,7 @@ class CPIC(nn.Module):
             do_init = False
 
         for epoch in tqdm.tqdm(range(epochs)):
-            losses, I_compress_bounds, I_predictive_bounds = [], [], []
+            loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch = [], [], []
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
@@ -314,18 +342,27 @@ class CPIC(nn.Module):
                     optimizer.step()
                     optimizer.zero_grad()
 
-                losses.append(loss.item())
-                I_compress_bounds.append(I_compress_bound.item())
-                I_predictive_bounds.append(I_predictive_bound.item())
+                if writer:
+                    writer.add_scalar("batch/loss", loss.item(), global_step)
+                    writer.add_scalar("batch/I_compress", I_compress_bound.item(), global_step)
+                    writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
+                    global_step += 1
+
+                loss_by_epoch.append(loss.item())
+                I_compress_bound_by_epoch.append(I_compress_bound.item())
+                I_predictive_bound_by_epoch.append(I_predictive_bound.item())
             
-            mean_loss = np.mean(losses)
-            mean_I_compress = np.mean(I_compress_bounds)
-            mean_I_predictive = np.mean(I_predictive_bounds)
-            if writer:
-                writer.add_scalar("loss", mean_loss, global_step=epoch)
-                writer.add_scalar("I_compress", mean_I_compress, global_step=epoch)
-                writer.add_scalar("I_predictive", mean_I_predictive, global_step=epoch)
+            mean_loss = np.mean(loss_by_epoch)
+            mean_I_compress = np.mean(I_compress_bound_by_epoch)
+            mean_I_predictive = np.mean(I_predictive_bound_by_epoch)
             print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}")
+            if writer:
+                writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
+                for name, fn in stats.items():                    
+                    writer.add_scalar(f"epoch/I_compress/{name}", fn(I_compress_bound_by_epoch), global_step=epoch) 
+                    writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
+                writer.add_histogram("epoch/I_compress_dist", np.array(I_compress_bound_by_epoch), epoch)
+                writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
 
             if mean_loss < best_loss:
                 best_loss = mean_loss

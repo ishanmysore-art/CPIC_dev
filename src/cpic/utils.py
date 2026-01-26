@@ -240,7 +240,7 @@ class StructuredEncoder(nn.Module):
             T=4,
             device="cuda:0", 
             deterministic=False,
-            linear_encoder=False,
+            linear_encoder=True,
             nonlinear_encoder_type="mlp",
             n_layers=1, activation='relu', 
             conv_kernel_size=3, conv_stride=1, conv_padding=1,

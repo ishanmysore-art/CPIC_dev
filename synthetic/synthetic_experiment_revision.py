@@ -87,12 +87,15 @@ linewidth_3d = 0.5
 # uses config_lorenz_stochastic_infonce_exploration.ini arguments
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CPIC experiments.')
-    parser.add_argument('--config', type=str, default=None)
+    parser.add_argument('--config', type=str, default="lorenz_revision")
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--device', type=str, default=None)
     args = parser.parse_args()
-    
-    config_file = 'config/config_revision.ini'
+
+    if args.config == 'lorenz_revision':
+        config_file = 'config/config_revision.ini'
+    else:
+        raise ValueError("{} has not been implemented!".format(args.config))
 
     cfg = myconf()
     cfg.read(config_file)
@@ -123,7 +126,7 @@ if __name__ == "__main__":
     deterministic = cfg.getboolean('Hyperparameters', 'deterministic')
     
     # read encoder parameters from config
-    linear_encoder = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else False
+    linear_encoder = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else True
     encoder_type = cfg.get('Hyperparameters', 'encoder_type') if cfg.has_option('Hyperparameters', 'encoder_type') else 'mlp'
     n_layers = cfg.getint('Hyperparameters', 'n_layers') if cfg.has_option('Hyperparameters', 'n_layers') else 1
     activation = cfg.get('Hyperparameters', 'activation') if cfg.has_option('Hyperparameters', 'activation') else 'relu'
@@ -142,7 +145,7 @@ if __name__ == "__main__":
         "conv_kernel_size": conv_kernel_size,
         "conv_stride": conv_stride,
         "conv_padding": conv_padding
-    } 
+    }
 
     # set training parameters
     do_vis_latent_trials = cfg.getboolean('Training', 'do_vis_latent_trials')
@@ -180,27 +183,26 @@ if __name__ == "__main__":
         else:
             init_weights = None
 
-        CPIC = CPIC(xdim, 
-                    ydim, 
-                    mi_params, 
-                    critic_params, 
-                    baseline_params,
-                    encoder_params,
-                    init_weights=init_weights,
+        cpic = CPIC(ydim=ydim, 
+                    mi_params=mi_params, 
+                    critic_params=critic_params, 
+                    baseline_params=baseline_params,
+                    encoder_params=encoder_params,
                     T=T,
                     hidden_dim=hidden_dim,
                     beta=beta, 
                     device=device,
                     predictive_space=predictive_space).to(device)
 
-        loss, _, _ = CPIC.fit(train_data, 
+        loss, _, _ = cpic.fit(X=train_data, 
+                              init_weights=init_weights,
                               epochs=num_epochs, 
                               batch_size=batch_size, 
                               lr=lr, 
                               early_stop=num_early_stop, 
                               writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
                     
-        encoded_mean = CPIC.encode(torch.from_numpy(X_noisy).to(device))
+        encoded_mean = cpic.encode(torch.from_numpy(X_noisy).to(device))
         X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)
         R2_PCA = compute_R2(X_pca_trans, X_dynamics)
         R2_DCA = compute_R2(X_dca_trans, X_dynamics)
