@@ -22,7 +22,7 @@ class CPIC(nn.Module):
 
     Parameters
     ----------
-    ydim : int, optional
+    ydim : int
         Dimensionality of the output data.
     xdim : int, optional
         Dimensionality of the input data. If None, use the encoder to infer input dimension. The default is None.
