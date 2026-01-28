@@ -1,15 +1,14 @@
-import sys, os
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
-from cpic.CPIC import train_CPIC
+from cpic.CPIC import CPIC
 from cpic.utils import PastFutureDataset, DCA_init
 from utils.data_util import linear_alignment, compute_R2
 import torch
-from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 import h5py
 from utils.plot_util import plot_lorenz_3d_colored
 import matplotlib.pyplot as plt
 from configparser import ConfigParser
 import argparse
+import os
 import pickle
 import numpy as np
 
@@ -85,6 +84,7 @@ def plot_latent_trials(X_dynamics, X_pca_trans=None, X_dca_trans=None, X_CPIC_tr
 linewidth_3d = 0.5
 
 
+# uses config_lorenz_stochastic_infonce_exploration.ini arguments
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CPIC experiments.')
     parser.add_argument('--config', type=str, default="lorenz_stochastic_infonce_obs_exploration")
@@ -150,15 +150,28 @@ if __name__ == "__main__":
     baseline_params = {"hidden_dim": hidden_dim}
     deterministic = cfg.getboolean('Hyperparameters', 'deterministic')
     
-    # get encoder parameters with defaults
+    # read encoder parameters from config
+    linear_encoder = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else True
     encoder_type = cfg.get('Hyperparameters', 'encoder_type') if cfg.has_option('Hyperparameters', 'encoder_type') else 'mlp'
+    n_layers = cfg.getint('Hyperparameters', 'n_layers') if cfg.has_option('Hyperparameters', 'n_layers') else 1
+    activation = cfg.get('Hyperparameters', 'activation') if cfg.has_option('Hyperparameters', 'activation') else 'relu'
+    
+    # conv-specific parameters
     conv_kernel_size = cfg.getint('Hyperparameters', 'conv_kernel_size') if cfg.has_option('Hyperparameters', 'conv_kernel_size') else 3
     conv_stride = cfg.getint('Hyperparameters', 'conv_stride') if cfg.has_option('Hyperparameters', 'conv_stride') else 1
     conv_padding = cfg.getint('Hyperparameters', 'conv_padding') if cfg.has_option('Hyperparameters', 'conv_padding') else 1
-    n_layers = cfg.getint('Hyperparameters', 'n_layers') if cfg.has_option('Hyperparameters', 'n_layers') else 1
-    activation = cfg.get('Hyperparameters', 'activation') if cfg.has_option('Hyperparameters', 'activation') else 'relu'
-    linear_encoding = cfg.getboolean('Hyperparameters', 'linear_encoding') if cfg.has_option('Hyperparameters', 'linear_encoding') else True
     
+    encoder_params = {
+        "deterministic": deterministic,
+        "linear_encoder": linear_encoder,
+        "nonlinear_encoder_type": encoder_type,
+        "n_layers": n_layers,
+        "activation": activation,
+        "conv_kernel_size": conv_kernel_size,
+        "conv_stride": conv_stride,
+        "conv_padding": conv_padding
+    }
+
     # set training parameters
     do_vis_latent_trials = cfg.getboolean('Training', 'do_vis_latent_trials')
     batch_size = cfg.getint('Training', 'batch_size')
@@ -172,6 +185,7 @@ if __name__ == "__main__":
     else:
         device = args.device
 
+    signature=22
 
     # load data
     with h5py.File(RESULTS_FILENAME, "r") as f:
@@ -186,40 +200,35 @@ if __name__ == "__main__":
     losses = []
     inferred_CPIC_trials = []
     for snr_val, X_pca_trans, X_dca_trans, X_noisy in zip(snr_vals, X_pca_trans_dset, X_dca_trans_dset, X_noisy_dset):
-        # if snr_val < 0.01:
-        #     continue
-        # import pdb; pdb.set_trace()
         train_data = PastFutureDataset([X_noisy], window_size=T)
-        train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
         # train data
         if do_dca_init:
             init_weights = DCA_init(X_noisy, T=T, d=ydim, rng_or_seed=args.seed)
         else:
             init_weights = None
-        # Create kernel save suffix with SNR and seed
-        if args.seed is not None:
-            kernel_suffix = f"seed_{args.seed}/snr_{snr_val:.4f}"
-        else:
-            kernel_suffix = f"snr_{snr_val:.4f}"
-        
-        CPIC, loss = train_CPIC(beta, xdim, ydim, mi_params, critic_params, baseline_params, num_epochs, train_dataloader,
-                          signature=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
-                          num_early_stop=num_early_stop, device=device, predictive_space=predictive_space,
-                          encoder_type=encoder_type, conv_kernel_size=conv_kernel_size, conv_stride=conv_stride,
-                          conv_padding=conv_padding, n_layers=n_layers, activation=activation, linear_encoding=linear_encoding, hidden_dim=hidden_dim,
-                          kernel_save_suffix=kernel_suffix)
-        CPIC = CPIC.to(device)
-        encoded_mean = CPIC.encode(torch.from_numpy(X_noisy).to(device))
-        encoded_mean_np = encoded_mean.cpu().detach().numpy()
-        
-        # check for NaN/Inf values before alignment
-        if np.any(np.isnan(encoded_mean_np)) or np.any(np.isinf(encoded_mean_np)):
-            print(f"WARNING: NaN or Inf found in encoded_mean. Skipping linear_alignment for this seed.")
-            print(f"encoded_mean shape: {encoded_mean_np.shape}, NaN count: {np.isnan(encoded_mean_np).sum()}, Inf count: {np.isinf(encoded_mean_np).sum()}")
-            X_CPIC_trans = aligned_encoded_mean = encoded_mean_np  # Skip alignment if NaN/Inf
-        else:
-            X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean_np, X_dynamics)
+
+        cpic = CPIC(ydim=ydim, 
+                    mi_params=mi_params, 
+                    critic_params=critic_params, 
+                    baseline_params=baseline_params,
+                    encoder_params=encoder_params,
+                    T=T,
+                    hidden_dim=hidden_dim,
+                    beta=beta, 
+                    device=device,
+                    predictive_space=predictive_space).to(device)
+
+        loss, _, _ = cpic.fit(X=train_data, 
+                              init_weights=init_weights,
+                              epochs=num_epochs, 
+                              batch_size=batch_size, 
+                              lr=lr, 
+                              early_stop=num_early_stop, 
+                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
+                    
+        encoded_mean = cpic.encode(torch.from_numpy(X_noisy).to(device))
+        X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)
         R2_PCA = compute_R2(X_pca_trans, X_dynamics)
         R2_DCA = compute_R2(X_dca_trans, X_dynamics)
         R2_CPIC = compute_R2(aligned_encoded_mean, X_dynamics)

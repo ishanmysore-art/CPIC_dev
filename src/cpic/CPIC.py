@@ -22,10 +22,10 @@ class CPIC(nn.Module):
 
     Parameters
     ----------
+    ydim : int, optional
+        Dimensionality of the output data.
     xdim : int, optional
         Dimensionality of the input data. If None, use the encoder to infer input dimension. The default is None.
-    ydim : int, optional
-        Dimensionality of the output data. Default is 3.
     mi_params : dict, optional
         Parameters for mutual information estimation. A dictionary with keys:
             estimator_compress : str
@@ -111,8 +111,8 @@ class CPIC(nn.Module):
     
     def __init__(
             self,
+            ydim,
             xdim=None, 
-            ydim=3,
             mi_params=None,
             critic_params=None,
             baseline_params=None,
