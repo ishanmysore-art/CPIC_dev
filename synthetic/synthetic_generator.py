@@ -7,6 +7,7 @@ from utils.plot_util import plot_lorenz_3d
 import matplotlib.pyplot as plt
 from dca import DynamicalComponentsAnalysis as DCA
 import argparse
+import os
 
 
 def gen_lorenz_system(T, integration_dt=0.005):
@@ -152,6 +153,8 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
     """
     np.random.seed(random_seed)
     # Save params
+    os.makedirs(os.path.dirname(RESULTS_FILENAME), exist_ok=True)
+
     with h5py.File(RESULTS_FILENAME, "w") as f:
         f.attrs["T"] = T
         f.attrs["N"] = N

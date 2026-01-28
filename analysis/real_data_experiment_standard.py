@@ -172,7 +172,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
             # import pdb; pdb.set_trace()
             CPIC, I_compress, I_predictive = train_CPIC(beta, xdim, dim, mi_params, critic_params, baseline_params, num_epochs,
                               train_dataloader, T=T_pi,
-                              signiture=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
+                              signature=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
                               num_early_stop=num_early_stop, device=device, beta1=beta1, beta2=beta2,
                               critic_params_YX=critic_params_YX, regularization_weight=regularization_weight,
                               return_mutual_information=True)

@@ -1,11 +1,11 @@
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]  # [CHANGE] upgraded setuptools to 61+ for full pyproject.toml metadata support
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "CPIC"
-version = "1.1.0"
+version = "0.1.0"
 description = "Compressed Predictive Information Coding"
 readme = "README.md"
 requires-python = ">=3.6"
