@@ -1,4 +1,4 @@
-from cpic.CPIC import CPIC
+from cpic import CPIC
 from cpic.utils import PastFutureDataset, DCA_init
 from utils.data_util import linear_alignment, compute_R2
 import torch
