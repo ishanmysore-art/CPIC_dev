@@ -1,5 +1,6 @@
 from cpic import CPIC
-from utils import PastFutureDataset, DCA_init
+from cpic.utils.data import PastFutureDataset
+from cpic.utils.helpers import DCA_init
 from utils.data_util import linear_alignment, compute_R2
 import torch
 from tensorboardX import SummaryWriter

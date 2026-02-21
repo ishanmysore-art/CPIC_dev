@@ -4,8 +4,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 import tqdm
 from tensorboardX import SummaryWriter
-import os
-from .utils import StructuredEncoder, CRITICS, BASELINES, estimate_mutual_information, visualize_conv_kernels
+from .models import StructuredEncoder, CRITICS, BASELINES, visualize_conv_kernels
+from .mi import estimate_mutual_information
 
 
 class CPIC(nn.Module):
