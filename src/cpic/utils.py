@@ -82,7 +82,7 @@ def conv_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activatio
         conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
         conv_layers.append(activation_f)
     
-    conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
+    conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0))) # REMOVE?
     final_num_features = conv_output_dim(final_num_features, kernel_size, stride, padding)
 
     # dimension of the flattened output of the conv layers (before the linear layer)

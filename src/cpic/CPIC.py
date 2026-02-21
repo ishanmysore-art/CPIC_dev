@@ -24,6 +24,8 @@ class CPIC(nn.Module):
     ----------
     ydim : int
         Dimensionality of the output data.
+    T : int
+        Length of the time window to compute PI.
     xdim : int, optional
         Dimensionality of the input data. If None, use the encoder to infer input dimension. The default is None.
     mi_params : dict, optional
@@ -74,8 +76,6 @@ class CPIC(nn.Module):
                 Output dimension for critic.
             hidden_dim : int
                 Hidden dimension for critic.
-    T : int, optional
-        Length of the time window to compute PI. The default is 4.
     hidden_dim : int, optional
         Hidden dimension for encoder and critic networks. The default is 256.
     beta : float, optional
@@ -112,13 +112,13 @@ class CPIC(nn.Module):
     def __init__(
             self,
             ydim,
+            T,
             xdim=None, 
             mi_params=None,
             critic_params=None,
             baseline_params=None,
             encoder_params={},
             critic_params_YX=None,
-            T=4,
             hidden_dim=256,
             beta=1e-3, beta1=1.0, beta2=0,
             device='cuda:0', 
@@ -457,7 +457,6 @@ class CPIC(nn.Module):
             Estimated predictive mutual information bound.
         """
         with torch.no_grad():
-            loss, I_compress_bound, I_predictive_bound = self(X_past.to(torch.float).to(self.device),
-                                                             X_future.to(torch.float).to(self.device))
+            loss, I_compress_bound, I_predictive_bound = self(X_past.float(), X_future.float())
         return loss.item(), I_compress_bound.item(), I_predictive_bound.item()
     
