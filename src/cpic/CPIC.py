@@ -3,7 +3,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 import numpy as np
 import tqdm
-from tensorboardX import SummaryWriter
 from .models import StructuredEncoder, CRITICS, BASELINES, visualize_conv_kernels
 from .mi import estimate_mutual_information
 
@@ -126,7 +125,7 @@ class CPIC(nn.Module):
             regularization_weight=0
             ):
         super(CPIC, self).__init__()
-        
+
         self.predictive_space = predictive_space
         self.beta = beta
         self.beta1 = beta1
@@ -135,14 +134,15 @@ class CPIC(nn.Module):
         self.ydim = ydim
         self.hidden_dim = hidden_dim
         self.T = T
-        self.deterministic = encoder_params.get('deterministic', False)
-        self.linear_encoder = encoder_params.get('linear_encoder', True)
-        self.nonlinear_encoder_type = encoder_params.get('nonlinear_encoder_type', 'mlp')
-        self.n_layers = encoder_params.get('n_layers', 1)
-        self.activation = encoder_params.get('activation', 'relu')
-        self.conv_kernel_size = encoder_params.get('conv_kernel_size', 3)
-        self.conv_stride = encoder_params.get('conv_stride', 1)
-        self.conv_padding = encoder_params.get('conv_padding', 1)
+        self.encoder_params = encoder_params or {}
+        self.deterministic = self.encoder_params.get('deterministic', False)
+        self.linear_encoder = self.encoder_params.get('linear_encoder', True)
+        self.nonlinear_encoder_type = self.encoder_params.get('nonlinear_encoder_type', 'mlp')
+        self.n_layers = self.encoder_params.get('n_layers', 1)
+        self.activation = self.encoder_params.get('activation', 'relu')
+        self.conv_kernel_size = self.encoder_params.get('conv_kernel_size', 3)
+        self.conv_stride = self.encoder_params.get('conv_stride', 1)
+        self.conv_padding = self.encoder_params.get('conv_padding', 1)
 
         if mi_params is None:
             mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
@@ -286,17 +286,21 @@ class CPIC(nn.Module):
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
-        self.encoder = StructuredEncoder(input_dim=self.xdim, output_dim=self.ydim, hidden_dim=self.hidden_dim, 
-                                         T=self.T, 
-                                         device=self.device,
-                                         deterministic=self.deterministic,
-                                         linear_encoder=self.linear_encoder,
-                                         nonlinear_encoder_type=self.nonlinear_encoder_type,
-                                         n_layers=self.n_layers,
-                                         activation=self.activation,
-                                         conv_kernel_size=self.conv_kernel_size,
-                                         conv_stride=self.conv_stride,
-                                         conv_padding=self.conv_padding)
+            
+        # normalise encoder configuration to encoder_type + kwargs for StructuredEncoder
+        encoder_kwargs = dict(self.encoder_params) if self.encoder_params is not None else {}
+        deterministic = encoder_kwargs.pop('deterministic', self.deterministic)
+        encoder_type = encoder_kwargs.pop('encoder_type', None)
+        self.encoder = StructuredEncoder(
+            input_dim=self.xdim,
+            output_dim=self.ydim,
+            hidden_dim=self.hidden_dim,
+            T=self.T,
+            device=self.device,
+            deterministic=deterministic,
+            encoder_type=encoder_type,
+            **encoder_kwargs,
+        )
         self.encoder.to(self.device)
         if init_weights is not None:
             self.encoder._mean.weight = torch.nn.parameter.Parameter(
@@ -376,7 +380,7 @@ class CPIC(nn.Module):
                     break
 
         # Visualize convolutional kernels if using conv encoder
-        if self.encoder.nonlinear_encoder_type == 'conv' and not self.encoder.linear_encoder:
+        if getattr(self.encoder, "encoder_type", None) == 'conv' and not self.encoder.linear_encoder:
             if signature is not None:
                 if kernel_save_suffix is not None:
                     kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"

@@ -124,7 +124,7 @@ def _extract_conv_layers(module):
 def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
     """visualize kernels for a single Conv2d layer."""
     kernels = layer.weight.detach().clone().cpu()
-    kernels = kernels.mean(dim =1, keepdim=True)
+    kernels = kernels.mean(dim=1, keepdim=True)
     
     print(kernels.size())
     kernels = kernels - kernels.min()
@@ -145,9 +145,15 @@ def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
 
 def visualize_conv_kernels(model, save_dir=None):
     encoder = model.encoder
-    if encoder.encoder_type != 'conv' or encoder.linear_encoding:
-        raise ValueError(f"Encoder is not a conv encoder or is using linear encoding. encoder_type: {encoder.encoder_type}, linear_encoding: {encoder.linear_encoding}")
     
+    encoder_type = getattr(encoder, "encoder_type", None)
+    is_linear = getattr(encoder, "linear_encoder", False)
+    if encoder_type != "conv" or is_linear:
+        raise ValueError(
+            f"Encoder is not a conv encoder or is using linear encoding. "
+            f"encoder_type: {encoder_type}, linear_encoder: {is_linear}"
+        )
+
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
@@ -172,6 +178,55 @@ class Zeros(nn.Module):
         return torch.zeros(output_dim).to(device=self.device)
 
 
+"""
+Encoder registry
+"""
+
+def _linear_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    # ignore hidden_dim, T and extra kwargs for a purely linear encoder
+    return nn.Linear(input_dim, output_dim)
+
+
+def _mlp_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 1)
+    activation = kwargs.get("activation", "relu")
+    return mlp(input_dim, hidden_dim, output_dim, n_layers=n_layers, activation=activation, T=T)
+
+
+def _conv_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    # we mirror the previous StructuredEncoder behaviour: n_layers controlled the
+    # number of hidden conv layers via the n_hidden_layers argument
+    n_layers = kwargs.get("n_layers", 0)
+    activation = kwargs.get("activation", "relu")
+    kernel_size = kwargs.get("conv_kernel_size", 3)
+    stride = kwargs.get("conv_stride", 1)
+    padding = kwargs.get("conv_padding", 1)
+    return conv_encoder(
+        input_dim,
+        hidden_dim,
+        output_dim,
+        n_hidden_layers=n_layers,
+        activation=activation,
+        T=T,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+    )
+
+
+ENCODERS = {
+    "linear": _linear_encoder_factory,
+    "mlp": _mlp_encoder_factory,
+    "conv": _conv_encoder_factory,
+}
+
+ENCODER_INPUT_SHAPE = {
+    "linear": "flat",
+    "mlp": "flat",
+    "conv": "conv2d",
+}
+
+
 class StructuredEncoder(nn.Module):
     def __init__(
             self, 
@@ -179,41 +234,55 @@ class StructuredEncoder(nn.Module):
             T=4,
             device="cuda:0", 
             deterministic=False,
+            encoder_type=None,
             linear_encoder=True,
             nonlinear_encoder_type="mlp",
-            n_layers=1, activation='relu', 
-            conv_kernel_size=3, conv_stride=1, conv_padding=1,
+            n_layers=1,
+            activation='relu',
+            conv_kernel_size=3,
+            conv_stride=1,
+            conv_padding=1,
+            **extra_encoder_kwargs,
             ):
         super(StructuredEncoder, self).__init__()
         self.deterministic = deterministic
-        self.linear_encoder = linear_encoder
-        self.nonlinear_encoder_type = nonlinear_encoder_type
 
-        if linear_encoder:
-            self._mean = nn.Linear(input_dim, output_dim)
-        else:
-            if nonlinear_encoder_type == "mlp":
-                self._mean = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=None)
-            elif nonlinear_encoder_type == "conv":
-                self._mean = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=None,
-                            kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
+        if encoder_type is None:
+            # linear vs nonlinear MLP/conv controlled by flags
+            if linear_encoder:
+                encoder_type = "linear"
             else:
-                raise ValueError(f"Unknown nonlinear_encoder_type: {nonlinear_encoder_type}. Must be 'mlp' or 'conv'.")
+                encoder_type = nonlinear_encoder_type
 
+        # pack encoder-specific kwargs; factories will pick what they need (ADD as we add more encoder types)
+        encoder_kwargs = {
+            "n_layers": n_layers,
+            "activation": activation,
+            "conv_kernel_size": conv_kernel_size,
+            "conv_stride": conv_stride,
+            "conv_padding": conv_padding,
+        }
+        encoder_kwargs.update(extra_encoder_kwargs)
+
+        if encoder_type not in ENCODERS:
+            raise ValueError(f"Unknown encoder_type: {encoder_type}. Available types: {list(ENCODERS.keys())}")
+
+        self.encoder_type = encoder_type
+        # keep a linear_encoder flag for downstream code and visualisation
+        self.linear_encoder = encoder_type == "linear"
+        self._input_shape = ENCODER_INPUT_SHAPE.get(encoder_type, "flat")
+
+        factory = ENCODERS[encoder_type]
+        # mean encoder does not depend on T
+        self._mean = factory(input_dim, hidden_dim, output_dim, T=None, **encoder_kwargs)
         if deterministic:
             self._logvars = Zeros(device=device)
         else:
-            if nonlinear_encoder_type == "mlp":
-                self._logvars = mlp(input_dim, hidden_dim, output_dim, n_layers, activation, T=T)
-            elif nonlinear_encoder_type == "conv":
-                self._logvars = conv_encoder(input_dim, hidden_dim, output_dim, n_layers, activation, T=T,
-                            kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding)
-            else:
-                raise ValueError(f"Unknown nonlinear_encoder_type: {nonlinear_encoder_type}. Must be 'mlp' or 'conv'.")
+            self._logvars = factory(input_dim, hidden_dim, output_dim, T=T, **encoder_kwargs)
 
     def forward(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self._input_shape == "conv2d" and not self.linear_encoder:
             # for conv, input should be (batch, 1, features, time))
             x_processed = self.reshape_for_conv(x)
         else:
@@ -230,7 +299,7 @@ class StructuredEncoder(nn.Module):
 
     def get_logvars(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self._input_shape == "conv2d" and not self.linear_encoder:
             x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear, no shape transformation needed
@@ -239,7 +308,7 @@ class StructuredEncoder(nn.Module):
 
     def get_mean(self, x):
         # handle input shape for conv vs mlp
-        if self.nonlinear_encoder_type == 'conv' and not self.linear_encoder:
+        if self._input_shape == "conv2d" and not self.linear_encoder:
             x_processed = self.reshape_for_conv(x)
         else:
             x_processed = x
@@ -277,7 +346,7 @@ class SeparableCritic(nn.Module):
         y = y.view(-1, self.y_dim)
         x_h = self._h(x)  # Batchsize x 32
         y_g = self._g(y)  # Batchsize x 32
-        scores = torch.matmul(x_h, torch.transpose(y_g, 0, 1)) #Each element i,j is a scalar in R. f(x, y)
+        scores = torch.matmul(x_h, torch.transpose(y_g, 0, 1)) # Each element i,j is a scalar in R. f(x, y)
         return scores
 
 
@@ -322,7 +391,7 @@ class UnnormalizedBaseline(nn.Module):
         return scores
 
 
-BASELINES= {
+BASELINES = {
     'constant': lambda: None,
     'unnormalized': UnnormalizedBaseline
 }
