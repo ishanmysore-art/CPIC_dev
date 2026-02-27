@@ -1,11 +1,13 @@
 __pycache__
 *.hdf5
 *.pkl
-tensor_logs/*
+**/tensor_logs
 .idea/*
 *.egg-info/
 dist/*
 *.pyc
 .venv/*
 .DS_Store
-res/*
+**/fig
+**/res
+**/data

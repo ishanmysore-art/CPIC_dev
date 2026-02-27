@@ -42,11 +42,32 @@ if __name__ == "__main__":
     R2_CPICs_obs_mean, R2_CPICs_obs_std, R2_CPICs_obs_opt = collect_data("res/lorenz_stochastic_infonce_obs_exploration", num_init)
     R2_CPICs_det_mean, R2_CPICs_det_std, R2_CPICs_det_opt = collect_data("res/lorenz_deterministic_infonce_exploration", num_init)
     R2_CPICs_det_obs_mean, R2_CPICs_det_obs_std, R2_CPICs_det_obs_opt = collect_data("res/lorenz_deterministic_infonce_obs_exploration", num_init)
+    
+    # collect the CPIC conv data (not using the function since it's a special case)
+    R2_CPICs_conv = list()
+    loss_CPICs_conv = list()
+    saved_root_conv = "res/lorenz_stochastic_infonce_exploration_conv"
+    for i in range(num_init):
+        with open(saved_root_conv + "/latent_R2_seed{}.pkl".format(i), "rb") as f:
+            res = pickle.load(f)
+        R2_metrics = res["R2_metrics"]
+        R2_CPICs_conv.append(R2_metrics)
+        losses = res["losses"]
+        loss_CPICs_conv.append(losses)
+    R2_CPICs_conv = np.stack(R2_CPICs_conv)[:,:,-1]
+    loss_CPICs_conv = np.stack(loss_CPICs_conv)
+    
+    R2_CPICs_mean_conv = np.mean(R2_CPICs_conv, axis=0)
+    R2_CPICs_std_conv = np.std(R2_CPICs_conv, axis=0)
+    R2_CPICs_opt_conv = list()
+    for idx, idx_min in enumerate(np.argmin(loss_CPICs_conv, axis=0)):
+        R2_CPICs_opt_conv.append(R2_CPICs_conv[idx_min, idx])
 
 
     fig = plt.figure(figsize=(5,5))
-    plt.plot(snr_vals, best_R2_DCAs, color="black", label="DCA")
-    plt.plot(snr_vals, R2_CPICs_obs_opt, color="red", linestyle="dashed", label="Stochastic CPIC(O))")
+    # plt.plot(snr_vals, best_R2_DCAs, color="black", label="DCA")
+    plt.plot(snr_vals, R2_CPICs_obs_opt, color="red", linestyle="dashed", label="Stochastic CPIC(O)")
+    # plt.plot(snr_vals, R2_CPICs_obs_conv_opt, color="red", linestyle="dotted", label="Stochastic CPIC(O, Conv)")
     plt.plot(snr_vals, R2_CPICs_opt, color="red", label="Stochastic CPIC(L)")
     plt.plot(snr_vals, R2_CPICs_det_obs_opt, color="blue", linestyle="dashed", label="Deterministic CPIC(O)")
     plt.plot(snr_vals, R2_CPICs_det_opt, color="blue", label="Deterministic CPIC(L)")
@@ -67,11 +88,17 @@ if __name__ == "__main__":
     plt.errorbar(snr_vals, R2_DCAs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_DCAs_std, c="black")
     
     plt.plot(snr_vals, R2_CPICs_obs_mean, linestyle="dashed", color="red", label="Stochastic CPIC(O)")
-    plt.errorbar(snr_vals, R2_CPICs_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std, c="red")
-    
+    # plt.errorbar(snr_vals, R2_CPICs_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std,
+    #              c="red")
+    # plt.plot(snr_vals, R2_CPICs_obs_conv_mean, linestyle="dotted", color="red", label="Stochastic CPIC(O, Conv)")
+    # plt.errorbar(snr_vals, R2_CPICs_obs_conv_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_conv_std,
+    #              c="red")
     plt.plot(snr_vals, R2_CPICs_mean, color="red", label="Stochastic CPIC(L)")
-    plt.errorbar(snr_vals, R2_CPICs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std, c="red")
-    
+    # plt.errorbar(snr_vals, R2_CPICs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std,
+    #              c="red")
+    plt.plot(snr_vals, R2_CPICs_mean_conv, linestyle="--", alpha=0.7, color="green", label="Stochastic CPIC(L, Conv)")
+    # plt.errorbar(snr_vals, R2_CPICs_mean_conv, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std_conv,
+    #              c="red")
     plt.plot(snr_vals, R2_CPICs_det_obs_mean, linestyle="dashed", color="blue", label="Deterministic CPIC(O)")
     plt.errorbar(snr_vals, R2_CPICs_det_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_det_obs_std, c="blue")
     
