@@ -122,7 +122,7 @@ def visualization(para_list, ts):
         plt.show()
 
 
-def plot_PI(T_list, PIs, lengthscales, save_file="figs/PI_vs_T.png"):
+def plot_PI(T_list, PIs, lengthscales, save_file="fig/PI_vs_T/PI_vs_T.png"):
     Ts = np.array(T_list)
     fig = plt.figure()
     for i, lengthscale in enumerate(lengthscales):
@@ -152,12 +152,12 @@ if __name__ == "__main__":
     para_list = [(1, 0.1), (1, 0.2), (1, 0.3), (1, 0.4)]
     lengthscales = np.array([para[1] for para in para_list])
 
-    if not os.path.exists("syn_gp_ts.pickle"):
+    if not os.path.exists("data/syn_gp_ts.pickle"):
         X, ts, Sigmas = data_generator(para_list, T=1000, num_sample=100, type="gp", xlim=(0, 10))
-        with open("syn_gp_ts.pickle", "wb") as file:
+        with open("data/syn_gp_ts.pickle", "wb") as file:
             pickle.dump((X, ts, Sigmas), file)
     else:
-        with open("syn_gp_ts.pickle", "rb") as file:
+        with open("data/syn_gp_ts.pickle", "rb") as file:
             X, ts, Sigmas = pickle.load(file)
 
     T_list = [10 * (i + 1) for i in range(40)]
@@ -165,6 +165,3 @@ if __name__ == "__main__":
     PIs = Compute_true_PI(Sigmas, T_list)
     print(PIs)
     plot_PI(T_list, PIs, lengthscales)
-
-
-    import pdb; pdb.set_trace()

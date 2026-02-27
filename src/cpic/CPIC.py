@@ -107,7 +107,7 @@ class CPIC(nn.Module):
     regularization_weight : float
         Weight for regularization term.
     """
-    
+
     def __init__(
             self,
             ydim,
