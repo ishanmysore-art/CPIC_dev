@@ -29,6 +29,19 @@ CPIC requests the pre-installation of DCA package for initialization. Please ref
    2. Real data experiments with other models using <code>real_data_competitors.py</code>.
    3. Real data experiments post analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>.
 
+## Encoder types
+CPIC supports multiple encoder architectures via <code>encoder_params["encoder_type"]</code>. All encoders map input (T x D) to output (T x M). Example configurations:
+
+- **Linear**: <code>{"encoder_type": "linear", "deterministic": False}</code>
+- **MLP**: <code>{"encoder_type": "mlp", "n_layers": 1, "activation": "relu", "deterministic": False}</code>
+- **2x MLP**: <code>{"encoder_type": "mlp2", "deterministic": False}</code>
+- **Conv (spatial only)**: <code>{"encoder_type": "conv_spatial"}</code> or <code>"conv"</code>, with optional <code>n_layers</code>, <code>conv_kernel_size</code>, <code>conv_stride</code>, <code>conv_padding</code>
+- **Conv (spatiotemporal)**: <code>{"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3, "conv_stride": 1}</code>
+- **1D temporal Conv**: <code>{"encoder_type": "conv1d_temporal", "kernel_size_1d": 3, "n_layers": 1}</code>
+- **Attention**: <code>{"encoder_type": "attention", "num_heads": 4, "num_layers": 2, "dropout": 0.1}</code>
+
+Pass <code>encoder_params</code> when constructing CPIC and when calling <code>fit()</code> the encoder is built from the registry.
+
 ## Configuration
 Synthetic experiment configurations for CPIC are available in <code>synthetic/config/\*</code>. Real data experiment configurations for CPIC are available in <code>analysis/config/\*</code>.
 
