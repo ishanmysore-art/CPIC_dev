@@ -69,7 +69,6 @@ if __name__ == "__main__":
     plt.plot(snr_vals, R2_CPICs_obs_opt, color="red", linestyle="dashed", label="Stochastic CPIC(O)")
     # plt.plot(snr_vals, R2_CPICs_obs_conv_opt, color="red", linestyle="dotted", label="Stochastic CPIC(O, Conv)")
     plt.plot(snr_vals, R2_CPICs_opt, color="red", label="Stochastic CPIC(L)")
-    plt.plot(snr_vals, R2_CPICs_opt_conv, color="green", linestyle="--", alpha=0.7, label="Stochastic CPIC(L, Conv)")
     plt.plot(snr_vals, R2_CPICs_det_obs_opt, color="blue", linestyle="dashed", label="Deterministic CPIC(O)")
     plt.plot(snr_vals, R2_CPICs_det_opt, color="blue", label="Deterministic CPIC(L)")
 
