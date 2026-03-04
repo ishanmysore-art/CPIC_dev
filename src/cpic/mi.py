@@ -50,15 +50,37 @@ def vub_upper_bound(mean, vars, device='cuda:0'):
 
 def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=None, decoder=None, device='cuda:0', debug=False, *args, **kwargs):
     """
-    Estimate variational lower/upper bounds on mutual information.
-    :param estimator: string specifying estimator, one of: 'nwj', 'infonce_lower', 'infonce_upper', 'tuba', 'mine' and 'vub'
-    :param x: [batch_size, dim_x] Tensor
-    :param y: [batch_size, dim_y] Tensor
-    :param critic_fn: callable that takes x and y as input and outputs critic scores
-          output shape is a [batch_size, batch_size] matrix
-    :param baseline_fn (optional): callable that takes y as input
-          outputs a [batch_size]  or [batch_size, 1] vector
-    :return: scalar estimate of mutual information
+    Estimate mutual information using variational lower or upper bounds.
+
+    Parameters
+    ----------
+    estimator : str
+        Which estimator to use. One of
+        {'nwj', 'infonce_lower', 'infonce_upper', 'tuba', 'mine', 'vub'}.
+    x : torch.Tensor
+        Input tensor of shape [batch_size, dim_x].
+    y : torch.Tensor
+        Input tensor of shape [batch_size, dim_y].
+    critic_fn : callable, optional
+        Function taking `(x, y)` and returning a score matrix of shape
+        [batch_size, batch_size]; used by all estimators except 'vub' when
+        `decoder` is provided.
+    baseline_fn : callable, optional
+        Function taking `y` and returning a baseline of shape
+        [batch_size] or [batch_size, 1]; used by the 'tuba' estimator.
+    decoder : callable, optional
+        Decoder mapping `x` to `(mean, vars)`; when provided, it is used with
+        `decoderscores` for likelihood-based estimators and with 'vub' to form
+        the variational upper bound.
+    device : str, optional
+        Device on which to perform tensor operations (e.g. 'cuda:0' or 'cpu').
+    debug : bool, optional
+        If True, enters debug mode after computing the estimate.
+
+    Returns
+    -------
+    mi : torch.Tensor
+        Scalar tensor containing the estimated mutual information bound.
     """
     if critic_fn is not None:
         scores = critic_fn(x, y)
@@ -71,7 +93,9 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
     if baseline_fn is not None:
         # Some baselines' output is (batch_size, 1) which we remove here.
         log_baseline = torch.squeeze(baseline_fn(y))
-    if estimator == 'infonce_lower':
+
+    # Use if/elif chain for compatibility with Python < 3.10
+    if estimator == "infonce_lower":
         mi = infonce_lower_bound(scores)
     elif estimator == "infonce_upper":
         mi = infonce_upper_bound(scores, device=device)
@@ -83,6 +107,8 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
         mi = mine_lower_bound(scores, device=device)
     elif estimator == "tuba":
         mi = tuba_lower_bound(scores, log_baseline, device=device)
+    else:
+        raise ValueError(f"Unknown estimator: {estimator}")
     if debug:
         import pdb; pdb.set_trace()
         decoderscores(decoded_mean_reshaped, decoded_vars_reshaped, y, debug=debug)

@@ -143,7 +143,19 @@ def conv_spatial_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, a
 
 
 def _extract_conv_layers(module):
-    """extract all Conv2d layers from a module."""
+    """
+    Extract all Conv2d layers from a module.
+    
+    Parameters
+    ----------
+    module : nn.Module
+        Module to extract Conv2d layers from
+
+    Returns
+    -------
+    layers : list
+        List of Conv2d layers
+    """
     layers = []
     for m in module.modules():
         if isinstance(m, nn.Conv2d):
@@ -152,7 +164,20 @@ def _extract_conv_layers(module):
 
 
 def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
-    """visualize kernels for a single Conv2d layer."""
+    """
+    Visualize kernels for a single Conv2d layer.
+
+    Parameters
+    ----------
+    layer : nn.Conv2d
+        Convolutional layer to visualize
+    layer_idx : int
+        Index of the layer
+    save_dir : str, optional
+        Directory to save the visualized kernels
+    type : str, optional
+        Type of layer to visualize ('mean' or 'std')
+    """
     kernels = layer.weight.detach().clone().cpu()
     kernels = kernels.mean(dim=1, keepdim=True)
     
@@ -174,6 +199,16 @@ def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
 
 
 def visualize_conv_kernels(model, save_dir=None):
+    """
+    Visualize convolutional kernels for a given model.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Model to visualize convolutional kernels for
+    save_dir : str, optional
+        Directory to save the visualized kernels
+    """
     encoder = model.encoder
     
     encoder_type = getattr(encoder, "encoder_type", None)
@@ -199,73 +234,40 @@ def visualize_conv_kernels(model, save_dir=None):
             _visualize_kernel_layer(layer, idx, save_dir, 'std')
 
 
-class Zeros(nn.Module):
-    def __init__(self, device="cuda:0"):
-        super(Zeros, self).__init__()
-        self.device = device
-
-    def forward(self, output_dim):
-        return torch.zeros(output_dim).to(device=self.device)
-
-
-"""
-Encoder registry
-"""
-
-def _linear_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    # ignore hidden_dim, T and extra kwargs for a purely linear encoder
-    return nn.Linear(input_dim, output_dim)
-
-
-def _mlp_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    n_layers = kwargs.get("n_layers", 1)
-    activation = kwargs.get("activation", "relu")
-    return mlp(input_dim, hidden_dim, output_dim, n_layers=n_layers, activation=activation, T=T)
-
-
-def _mlp_x2_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    activation = kwargs.get("activation", "relu")
-    return mlp(input_dim, hidden_dim, output_dim, n_layers=2, activation=activation, T=T)
-
-
-def _conv_spatial_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    n_layers = kwargs.get("n_layers", 0)
-    activation = kwargs.get("activation", "relu")
-    kernel_size = kwargs.get("conv_kernel_size", 3)
-    stride = kwargs.get("conv_stride", 1)
-    padding = kwargs.get("conv_padding", 1)
-    return conv_spatial_encoder(
-        input_dim,
-        hidden_dim,
-        output_dim,
-        n_hidden_layers=n_layers,
-        activation=activation,
-        T=T,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
-    )
-
-
-def conv_spatiotemporal_encoder(
-    input_dim,
-    hidden_dim,
-    output_dim,
-    n_hidden_layers=0,
-    activation="relu",
-    T=None,
-    kernel_size_feat=3,
-    kernel_size_time=3,
-    stride_feat=1,
-    stride_time=1,
-    padding_feat=1,
-    padding_time=1,
-):
-    """
+def conv_spatiotemporal_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation="relu", T=None,
+                                kernel_size_feat=3, kernel_size_time=3, stride_feat=1, stride_time=1, padding_feat=1, padding_time=1):
+    '''
     2D convolutional encoder that convolves over both feature and time dimensions.
     Input (batch, 1, input_dim, T) -> output (batch, T, output_dim). Preserves T via padding.
-    """
-    if activation == "relu":
+
+    Parameters
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    hidden_dim : int
+        Number of channels in hidden layers & output layer
+    output_dim : int
+        Output feature dimension (ydim)
+    n_hidden_layers : int, optional
+        Number of hidden layers (there are 2 conv layers + 1 linear layer by default)
+    activation : str, optional
+        Activation function ('relu' by default)
+    T : int, optional
+        Time window    
+    kernel_size_feat : int, optional
+        Convolutional kernel size for feature dimension
+    kernel_size_time : int, optional
+        Convolutional kernel size for time dimension
+    stride_feat : int, optional
+        Convolutional stride for feature dimension
+    stride_time : int, optional
+        Convolutional stride for time dimension
+    padding_feat : int, optional
+        Convolutional padding for feature dimension
+    padding_time : int, optional
+        Convolutional padding for time dimension
+    '''
+    if activation == 'relu':
         activation_f = nn.ReLU()
 
     def conv2d_output_size(in_h, in_w, k_h, k_w, s_h, s_w, p_h, p_w):
@@ -353,32 +355,24 @@ def conv_spatiotemporal_encoder(
     return ConvSpatiotemporalEncoder(conv_layers, flattened_dim, output_dim, out_T)
 
 
-def _conv_spatiotemporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    n_layers = kwargs.get("n_layers", 0)
-    activation = kwargs.get("activation", "relu")
-    k = kwargs.get("conv_kernel_size", 3)
-    s = kwargs.get("conv_stride", 1)
-    p_feat = kwargs.get("conv_padding", 1)
-    p_time = (k - 1) // 2
-    return conv_spatiotemporal_encoder(
-        input_dim,
-        hidden_dim,
-        output_dim,
-        n_hidden_layers=n_layers,
-        activation=activation,
-        T=T,
-        kernel_size_feat=k,
-        kernel_size_time=k,
-        stride_feat=s,
-        stride_time=1,
-        padding_feat=p_feat,
-        padding_time=p_time,
-    )
-
-
 class TemporalConv1dEncoder(nn.Module):
     """
     1D temporal convolution along the time axis. Input (batch, T, D) -> output (batch, T, M).
+
+    Parameters
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    hidden_dim : int
+        Number of channels in hidden layers & output layer
+    output_dim : int
+        Output feature dimension (ydim)
+    kernel_size : int, optional
+        Convolutional kernel size
+    n_layers : int, optional
+        Number of hidden layers
+    activation : str, optional
+        Activation function ('relu' by default)
     """
     def __init__(self, input_dim, hidden_dim, output_dim, kernel_size=3, n_layers=1, activation="relu"):
         super().__init__()
@@ -408,74 +402,71 @@ class TemporalConv1dEncoder(nn.Module):
         return x
 
 
+class Zeros(nn.Module):
+    """
+    Zero encoder that returns all zeros.
+
+    Parameters
+    ----------
+    device : str, optional
+        Device to use ('cuda:0' by default)
+    """
+    def __init__(self, device="cuda:0"):
+        super(Zeros, self).__init__()
+        self.device = device
+
+    def forward(self, output_dim):
+        return torch.zeros(output_dim).to(device=self.device)
+
+
+"""
+Encoder registry
+"""
+
+def _linear_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    # ignore hidden_dim, T and extra kwargs for a purely linear encoder
+    return nn.Linear(input_dim, output_dim)
+
+
+def _mlp_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 1)
+    activation = kwargs.get("activation", "relu")
+    return mlp(input_dim, hidden_dim, output_dim, n_layers=n_layers, activation=activation, T=T)
+
+
+def _mlp_x2_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    activation = kwargs.get("activation", "relu")
+    return mlp(input_dim, hidden_dim, output_dim, n_layers=2, activation=activation, T=T)
+
+
+def _conv_spatial_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 0)
+    activation = kwargs.get("activation", "relu")
+    kernel_size = kwargs.get("conv_kernel_size", 3)
+    stride = kwargs.get("conv_stride", 1)
+    padding = kwargs.get("conv_padding", 1)
+    return conv_spatial_encoder(input_dim, hidden_dim, output_dim, 
+                                n_hidden_layers=n_layers, activation=activation, T=T,
+                                kernel_size=kernel_size, stride=stride, padding=padding)
+
+
+def _conv_spatiotemporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 0)
+    activation = kwargs.get("activation", "relu")
+    k = kwargs.get("conv_kernel_size", 3)
+    s = kwargs.get("conv_stride", 1)
+    p_feat = kwargs.get("conv_padding", 1)
+    p_time = (k - 1) // 2
+    return conv_spatiotemporal_encoder(input_dim, hidden_dim, output_dim, n_hidden_layers=n_layers, activation=activation, T=T,
+                                       kernel_size_feat=k, kernel_size_time=k, stride_feat=s, stride_time=1, padding_feat=p_feat, padding_time=p_time)
+
+
 def _conv1d_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
     kernel_size = kwargs.get("kernel_size_1d", kwargs.get("conv_kernel_size", 3))
     n_layers = kwargs.get("n_layers", 1)
     activation = kwargs.get("activation", "relu")
-    return TemporalConv1dEncoder(
-        input_dim, hidden_dim, output_dim,
-        kernel_size=kernel_size,
-        n_layers=n_layers,
-        activation=activation,
-    )
-
-
-class AttentionEncoder(nn.Module):
-    """
-    Self-attention over the time dimension. Input (batch, T, D) -> output (batch, T, M).
-    """
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        output_dim,
-        num_heads=4,
-        num_layers=2,
-        dropout=0.1,
-        dim_feedforward=None,
-    ):
-        super().__init__()
-        self.input_proj = nn.Linear(input_dim, hidden_dim)
-        dim_feedforward = dim_feedforward or (4 * hidden_dim)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=num_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="relu",
-            batch_first=False,
-            norm_first=False,
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.output_proj = nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        if x.ndim == 2:
-            x = x.unsqueeze(1)
-        x = self.input_proj(x)
-        x = x.permute(1, 0, 2)
-        x = self.transformer(x)
-        x = x.permute(1, 0, 2)
-        x = self.output_proj(x)
-        if x.shape[1] == 1:
-            x = x.squeeze(1)
-        return x
-
-
-def _attention_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
-    num_heads = kwargs.get("num_heads", 4)
-    num_layers = kwargs.get("num_layers", 2)
-    dropout = kwargs.get("dropout", 0.1)
-    dim_feedforward = kwargs.get("dim_feedforward", None)
-    return AttentionEncoder(
-        input_dim,
-        hidden_dim,
-        output_dim,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        dropout=dropout,
-        dim_feedforward=dim_feedforward,
-    )
+    return TemporalConv1dEncoder(input_dim, hidden_dim, output_dim, 
+                                 kernel_size=kernel_size, n_layers=n_layers, activation=activation)
 
 
 # Registry of encoder factories. Use encoder_type in encoder_params when building CPIC, e.g.:
@@ -484,7 +475,6 @@ def _attention_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwar
 #   encoder_params = {"encoder_type": "conv_spatial", "conv_kernel_size": 3}
 #   encoder_params = {"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3}
 #   encoder_params = {"encoder_type": "conv1d_temporal", "kernel_size_1d": 3}
-#   encoder_params = {"encoder_type": "attention", "num_heads": 4, "num_layers": 2}
 ENCODERS = {
     "linear": _linear_encoder_factory,
     "mlp": _mlp_encoder_factory,
@@ -494,7 +484,6 @@ ENCODERS = {
     "conv_spatial": _conv_spatial_encoder_factory,
     "conv_spatiotemporal": _conv_spatiotemporal_encoder_factory,
     "conv1d_temporal": _conv1d_temporal_encoder_factory,
-    "attention": _attention_encoder_factory,
 }
 
 ENCODER_INPUT_SHAPE = {
@@ -506,11 +495,72 @@ ENCODER_INPUT_SHAPE = {
     "conv_spatial": "conv2d",
     "conv_spatiotemporal": "conv2d",
     "conv1d_temporal": "flat",
-    "attention": "flat",
 }
 
 
 class StructuredEncoder(nn.Module):
+    """
+    Structured encoder that combines multiple encoder types. 
+    Encodes input (T x D) to output (T x M) using a specified encoder type.
+
+    Parameters
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    hidden_dim : int
+        Number of channels in hidden layers & output layer
+    output_dim : int
+        Output feature dimension (ydim)
+    T : int, optional
+        Time window
+    device : str, optional
+        Device to use ('cuda:0' by default)
+    deterministic : bool, optional
+        Whether to use deterministic encoder. Default is False.
+    encoder_type : str, optional
+        Type of encoder. Default is None.
+    linear_encoder : bool, optional
+        Whether to use linear encoder. Default is True.
+    nonlinear_encoder_type : str, optional
+        Type of nonlinear encoder. Default is 'mlp'.
+    n_layers : int, optional
+        Number of layers for nonlinear encoder. Default is 1.
+    activation : str, optional
+        Activation function for nonlinear encoder. Default is 'relu'.
+    conv_kernel_size : int, optional
+        Kernel size for convolutional encoder. Default is 3.
+    conv_stride : int, optional
+        Stride for convolutional encoder. Default is 1.
+    conv_padding : int, optional
+        Padding for convolutional encoder. Default is 1.
+    **extra_encoder_kwargs : dict, optional
+        Extra encoder-specific kwargs.
+
+    Attributes
+    ----------
+    encoder_type : str
+        Type of encoder.
+    linear_encoder : bool
+        Whether to use linear encoder.
+    nonlinear_encoder_type : str
+        Type of nonlinear encoder.
+    n_layers : int
+        Number of layers for nonlinear encoder.
+    activation : str
+        Activation function for nonlinear encoder.
+    conv_kernel_size : int
+        Kernel size for convolutional encoder.
+    conv_stride : int
+        Stride for convolutional encoder.
+    conv_padding : int
+        Padding for convolutional encoder.
+    _input_shape : str
+        Input shape for encoder.
+    _mean : nn.Module
+        Mean encoder network.
+    _logvars : nn.Module
+        Variance encoder network.
+    """
     def __init__(
             self, 
             input_dim, hidden_dim, output_dim,

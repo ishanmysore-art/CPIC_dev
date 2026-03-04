@@ -3,12 +3,26 @@ from torch.utils.data import Dataset
 
 
 class PastFutureDataset(Dataset):
-    def __init__(self, ts_list, window_size):
-        """
-        :param ts: a list of time series T_i x N
-        :param window_size:
-        """
+    """
+    Dataset for past and future time series data.
 
+    Parameters
+    ----------
+    ts_list : list of numpy.ndarray
+        List of time series arrays, each of shape (T_i, N),
+        where T_i is the length of the series and N is the number of variables.
+    window_size : int
+        Length of the past and future windows (in time steps).
+
+    Attributes
+    ----------
+    past_ts : numpy.ndarray of shape (num_windows, window_size, N)
+        Past time series data.
+    future_ts : numpy.ndarray of shape (num_windows, window_size, N)
+        Future time series data.
+    """
+
+    def __init__(self, ts_list, window_size):
         # if standardization:
         #     ts = (ts.T/ts.std(axis=1)).T
         past_ts = []
