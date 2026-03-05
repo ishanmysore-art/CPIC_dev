@@ -94,21 +94,21 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
         # Some baselines' output is (batch_size, 1) which we remove here.
         log_baseline = torch.squeeze(baseline_fn(y))
 
-    # Use if/elif chain for compatibility with Python < 3.10
-    if estimator == "infonce_lower":
-        mi = infonce_lower_bound(scores)
-    elif estimator == "infonce_upper":
-        mi = infonce_upper_bound(scores, device=device)
-    elif estimator == "vub":
-        mi = vub_upper_bound(decoded_mean, decoded_vars, device=device)
-    elif estimator == "nwj":
-        mi = nwj_lower_bound(scores, device=device)
-    elif estimator == "mine":
-        mi = mine_lower_bound(scores, device=device)
-    elif estimator == "tuba":
-        mi = tuba_lower_bound(scores, log_baseline, device=device)
-    else:
-        raise ValueError(f"Unknown estimator: {estimator}")
+    match estimator:
+        case "infonce_lower":
+            mi = infonce_lower_bound(scores)
+        case "infonce_upper":
+            mi = infonce_upper_bound(scores, device=device)
+        case "vub":
+            mi = vub_upper_bound(decoded_mean, decoded_vars, device=device)
+        case "nwj":
+            mi = nwj_lower_bound(scores, device=device)
+        case "mine":
+            mi = mine_lower_bound(scores, device=device)
+        case "tuba":
+            mi = tuba_lower_bound(scores, log_baseline, device=device)
+        case _:
+            raise ValueError(f"Unknown estimator: {estimator}")
     if debug:
         import pdb; pdb.set_trace()
         decoderscores(decoded_mean_reshaped, decoded_vars_reshaped, y, debug=debug)
