@@ -1,5 +1,9 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
+import os
+import torchvision
+import torch.nn as nn
 import dca as DCA
 
 
@@ -35,6 +39,98 @@ def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):
             print("Decoder scores shape:", scores.shape)
             print("Decoder scores sample:", scores[0, :5])
         return scores
+
+
+def _extract_conv_layers(module):
+    """
+    Extract all Conv2d layers from a module.
+    
+    Parameters
+    ----------
+    module : nn.Module
+        Module to extract Conv2d layers from
+
+    Returns
+    -------
+    layers : list
+        List of Conv2d layers
+    """
+    layers = []
+    for m in module.modules():
+        if isinstance(m, nn.Conv2d):
+            layers.append(m)
+    return layers
+
+
+def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
+    """
+    Visualize kernels for a single Conv2d layer.
+
+    Parameters
+    ----------
+    layer : nn.Conv2d
+        Convolutional layer to visualize
+    layer_idx : int
+        Index of the layer
+    save_dir : str, optional
+        Directory to save the visualized kernels
+    type : str, optional
+        Type of layer to visualize ('mean' or 'std')
+    """
+    kernels = layer.weight.detach().clone().cpu()
+    kernels = kernels.mean(dim=1, keepdim=True)
+    
+    print(kernels.size())
+    kernels = kernels - kernels.min()
+    if kernels.max() != 0:
+        kernels = torch.abs(kernels / kernels.max())
+    
+    filter_img = torchvision.utils.make_grid(kernels, nrow=8)
+    # Take first channel only to get 2D array for colormap
+    filter_img_2d = filter_img[0, :, :]
+    plt.imshow(filter_img_2d, cmap='gist_gray')
+    plt.colorbar()
+    
+    plt.title(f'{type} Layer {layer_idx} - {kernels.shape[0]} filters')
+    
+    plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
+    plt.close()
+
+
+def visualize_conv_kernels(model, save_dir=None):
+    """
+    Visualize convolutional kernels for a given model.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Model to visualize convolutional kernels for
+    save_dir : str, optional
+        Directory to save the visualized kernels
+    """
+    encoder = model.encoder
+    
+    encoder_type = getattr(encoder, "encoder_type", None)
+    is_linear = getattr(encoder, "linear_encoder", False)
+    if encoder_type not in ("conv", "conv_spatial") or is_linear:
+        raise ValueError(
+            f"Encoder is not a conv encoder or is using linear encoding. "
+            f"encoder_type: {encoder_type}, linear_encoder: {is_linear}"
+        )
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # visualize mean encoder layers
+    mean_layers = _extract_conv_layers(encoder._mean)
+    for idx, layer in enumerate(mean_layers):
+        _visualize_kernel_layer(layer, idx, save_dir, 'mean')
+    
+    # visualize std encoder layers
+    if not encoder.deterministic:
+        std_layers = _extract_conv_layers(encoder._logvars)
+        for idx, layer in enumerate(std_layers):
+            _visualize_kernel_layer(layer, idx, save_dir, 'std')
 
 
 def DCA_init(X, T, d, n_init=1, rng_or_seed=None):

@@ -3,8 +3,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 import numpy as np
 import tqdm
-from .models import StructuredEncoder, CRITICS, BASELINES, visualize_conv_kernels
+from .models import StructuredEncoder, CRITICS, BASELINES
 from .mi import estimate_mutual_information
+from .utils.helpers import visualize_conv_kernels
 
 
 class CPIC(nn.Module):
@@ -379,8 +380,8 @@ class CPIC(nn.Module):
                     print("Early stopping...")
                     break
 
-        # Visualize convolutional kernels if using conv encoder
-        if getattr(self.encoder, "encoder_type", None) in ('conv', 'conv_spatial') and not self.encoder.linear_encoder:
+        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder
+        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal') and not self.encoder.linear_encoder:
             if signature is not None:
                 if kernel_save_suffix is not None:
                     kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
