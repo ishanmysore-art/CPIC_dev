@@ -380,7 +380,6 @@ ENCODER_INPUT_SHAPE = {
     "linear": "flat",
     "mlp": "flat",
     "mlp2": "flat",
-    "conv": "conv2d",
     "conv_spatial": "conv2d",
     "conv_spatiotemporal": "conv2d",
     "conv1d_temporal": "flat",

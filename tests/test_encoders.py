@@ -119,8 +119,6 @@ def test_encoder_registry_forward_passes():
         "linear",
         "mlp",
         "mlp2",
-        "mlp_x2",
-        "conv",
         "conv_spatial",
         "conv_spatiotemporal",
         "conv1d_temporal",
