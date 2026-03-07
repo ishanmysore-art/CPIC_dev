@@ -54,7 +54,7 @@ class ConvSpatialEncoder(nn.Module):
         Number of channels in hidden layers & output layer
     output_dim : int
         Output feature dimension (ydim)
-    n_hidden_layers : int, optional
+    n_layers : int, optional
         Number of hidden layers
     activation : str, optional
         Activation function ('relu' by default)
@@ -67,7 +67,7 @@ class ConvSpatialEncoder(nn.Module):
     padding : int, optional
         Convolutional padding
     """
-    def __init__(self, input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
         super().__init__()
         # input shape: (batch, 1, input_dim, length) - reshape_for_conv will handle this
 
@@ -92,7 +92,7 @@ class ConvSpatialEncoder(nn.Module):
         conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
         conv_layers.append(activation_f)
         
-        for _ in range(n_hidden_layers):
+        for _ in range(n_layers):
             conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
             final_num_features = conv_spatial_output_dim(final_num_features, kernel_size, stride, padding)
 
@@ -114,21 +114,21 @@ class ConvSpatialEncoder(nn.Module):
         self.linear = nn.Linear(self.flattened_dim, self.output_dim)
 
     def forward(self, x):
-        output = self.conv_seq(x)
+        out = self.conv_seq(x)
 
-        if output.shape[2] * output.shape[1] != self.flattened_dim:
-            raise ValueError(f"output.shape[2] * output.shape[1] != flattened_dim: {output.shape[2] * output.shape[1]} != {self.flattened_dim}")
+        if out.shape[2] * out.shape[1] != self.flattened_dim:
+            raise ValueError(f"output.shape[2] * output.shape[1] != flattened_dim: {out.shape[2] * out.shape[1]} != {self.flattened_dim}")
 
-        output = output.permute(0, 3, 1, 2)
-        output = torch.flatten(output, start_dim=2)
-        output = self.linear(output)
+        out = out.permute(0, 3, 1, 2)
+        out = torch.flatten(out, start_dim=2)
+        out = self.linear(out)
 
         # output shape: (batch, T, output_dim)
         # if T is 1, change output to (batch, output_dim)
-        if output.shape[1] == 1:
-            output = output.squeeze(1)
+        if out.shape[1] == 1:
+            out = out.squeeze(1)
             
-        return output
+        return out
 
 
 class ConvSpatiotemporalEncoder(nn.Module):
@@ -144,7 +144,7 @@ class ConvSpatiotemporalEncoder(nn.Module):
         Number of channels in hidden layers & output layer
     output_dim : int
         Output feature dimension (ydim)
-    n_hidden_layers : int, optional
+    n_layers : int, optional
         Number of hidden layers
     activation : str, optional
         Activation function ('relu' by default)
@@ -163,7 +163,7 @@ class ConvSpatiotemporalEncoder(nn.Module):
     padding_time : int, optional
         Convolutional padding for time dimension
     """
-    def __init__(self, input_dim, hidden_dim, output_dim, n_hidden_layers=0, activation="relu", T=None,
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation="relu", T=None,
                  kernel_size_feat=3, kernel_size_time=3, stride_feat=1, stride_time=1, padding_feat=1, padding_time=1):
         super().__init__()
 
@@ -184,7 +184,7 @@ class ConvSpatiotemporalEncoder(nn.Module):
         in_T = 1 if T is None else max(1, T)
         h_out, w_out = conv_spatiotemporal_output_dim(input_dim, in_T, kernel_size_feat, kernel_size_time, stride_feat, stride_time, padding_feat, padding_time)
 
-        for _ in range(n_hidden_layers):
+        for _ in range(n_layers):
             conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size_feat, kernel_size_time), stride=(stride_feat, stride_time), padding=(padding_feat, padding_time)))
             h_out, w_out = conv_spatiotemporal_output_dim(h_out, w_out, kernel_size_feat, kernel_size_time, stride_feat, stride_time, padding_feat, padding_time)
             
@@ -207,13 +207,18 @@ class ConvSpatiotemporalEncoder(nn.Module):
         self.linear = nn.Linear(flattened_dim, output_dim * out_T)
 
     def forward(self, x):
+        # input shape: (batch, 1, input_dim, T)
         out = self.conv_seq(x)
         B, C, H, W = out.shape
         out = out.permute(0, 2, 3, 1).reshape(B, -1)
         out = self.linear(out)
         out = out.view(B, self.out_T, self.output_dim)
+
+        # output shape: (batch, T, output_dim)
+        # if T is 1, change output to (batch, output_dim)
         if out.shape[1] == 1:
             out = out.squeeze(1)
+
         return out
     
 
@@ -240,14 +245,20 @@ class TemporalConv1dEncoder(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
+
         padding = kernel_size // 2
-        act = nn.ReLU() if activation == "relu" else nn.ReLU()
+
+        activation_f = nn.ReLU() if activation == "relu" else nn.ReLU()
+
         layers = []
+
         layers.append(nn.Conv1d(input_dim, hidden_dim, kernel_size, padding=padding))
-        layers.append(act)
-        for _ in range(n_layers - 1):
+        layers.append(activation_f)
+
+        for _ in range(n_layers):
             layers.append(nn.Conv1d(hidden_dim, hidden_dim, kernel_size, padding=padding))
-            layers.append(act)
+            layers.append(activation_f)
+
         self.conv_seq = nn.Sequential(*layers)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
@@ -255,14 +266,17 @@ class TemporalConv1dEncoder(nn.Module):
         # reshape input to (batch, time, features)
         if x.ndim == 2:
             x = x.unsqueeze(1)
-        B, T, D = x.shape
-        x = x.permute(0, 2, 1)
-        x = self.conv_seq(x)
-        x = x.permute(0, 2, 1)
-        x = self.linear(x)
-        if x.shape[1] == 1:
-            x = x.squeeze(1)
-        return x
+        x = x.permute(0, 2, 1) # (batch, features, time) -> (batch, time, features)
+
+        out = self.conv_seq(x)
+        out = out.permute(0, 2, 1)
+        out = self.linear(out)
+
+        # output shape: (batch, T, output_dim)
+        # if T is 1, change output to (batch, output_dim)
+        if out.shape[1] == 1:
+            out = out.squeeze(1)
+        return out
 
 
 class Zeros(nn.Module):
@@ -304,7 +318,7 @@ def _conv_spatial_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **k
         input_dim,
         hidden_dim,
         output_dim,
-        n_hidden_layers=n_layers,
+        n_layers=n_layers,
         activation=activation,
         T=T,
         kernel_size=kernel_size,
@@ -324,7 +338,7 @@ def _conv_spatiotemporal_encoder_factory(input_dim, hidden_dim, output_dim, T=No
         input_dim,
         hidden_dim,
         output_dim,
-        n_hidden_layers=n_layers,
+        n_layers=n_layers,
         activation=activation,
         T=T,
         kernel_size_feat=k,
@@ -348,17 +362,15 @@ def _conv1d_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, 
     )
 
 # Registry of encoder factories. Use encoder_type in encoder_params when building CPIC, e.g.:
-#   encoder_params = {"encoder_type": "mlp", "n_layers": 1, "deterministic": False}
-#   encoder_params = {"encoder_type": "mlp2", "deterministic": False}
+#   encoder_params = {"encoder_type": "mlp"}
+#   encoder_params = {"encoder_type": "mlp2"}
 #   encoder_params = {"encoder_type": "conv_spatial", "conv_kernel_size": 3}
-#   encoder_params = {"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3}
-#   encoder_params = {"encoder_type": "conv1d_temporal", "kernel_size_1d": 3}
+#   encoder_params = {"encoder_type": "conv_spatiotemporal", "kernel_size_feat": 3, "kernel_size_time": 3}
+#   encoder_params = {"encoder_type": "conv1d_temporal", "kernel_size": 3}
 ENCODERS = {
     "linear": _linear_encoder_factory,
     "mlp": _mlp_encoder_factory,
     "mlp2": _mlp_x2_encoder_factory,
-    "mlp_x2": _mlp_x2_encoder_factory,
-    "conv": _conv_spatial_encoder_factory,
     "conv_spatial": _conv_spatial_encoder_factory,
     "conv_spatiotemporal": _conv_spatiotemporal_encoder_factory,
     "conv1d_temporal": _conv1d_temporal_encoder_factory,
@@ -368,7 +380,6 @@ ENCODER_INPUT_SHAPE = {
     "linear": "flat",
     "mlp": "flat",
     "mlp2": "flat",
-    "mlp_x2": "flat",
     "conv": "conv2d",
     "conv_spatial": "conv2d",
     "conv_spatiotemporal": "conv2d",
@@ -488,6 +499,7 @@ class StructuredEncoder(nn.Module):
             self._mean = factory(input_dim, hidden_dim, output_dim, T=T, **encoder_kwargs)
         else:
             self._mean = factory(input_dim, hidden_dim, output_dim, T=None, **encoder_kwargs)
+            
         if deterministic:
             self._logvars = Zeros(device=device)
         else:

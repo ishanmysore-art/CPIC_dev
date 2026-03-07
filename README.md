@@ -1,15 +1,27 @@
 # Compressed Predictive Information Coding 
 This repo is used to publish the code for Compressed Predictive Information Coding (CPIC) methodology.
 
-## Preinstall Pacakages
-CPIC requests the pre-installation of DCA package for initialization. Please refer to https://dynamicalcomponentsanalysis.readthedocs.io/en/latest/index.html.
+## Installation
+
+Install CPIC with:
+```bash
+pip install cpic
+```
+
+For **DCA initialization** (e.g. `DCA_init`, `load_sabes_data`): install the optional dependency:
+```bash
+pip install "cpic[dca]"
+```
+(Quotes are required in zsh so `[dca]` is not interpreted as a glob.) This installs DynamicalComponentsAnalysis and pins NumPy<2 for compatibility. See https://dynamicalcomponentsanalysis.readthedocs.io/en/latest/index.html.
 
 ## Code
 
 ### Main Code
 1. Main code:
    1. CPIC code: <code>src/cpic/CPIC.py</code>
-   2. utility code: <code>src/cpic/utils.py/</code>
+   2. Encoders, Critics, Baselines: <code>src/cpic/models.py</code>
+   3. Mutual information estimation: <code>src/cpic/mi.py</code>
+   4. utility code: <code>src/cpic/utils/</code>
 
 ### Synthetic Experiments
 

@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import os
 import torchvision
 import torch.nn as nn
-import dca as DCA
 
 
 def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):
@@ -112,7 +111,7 @@ def visualize_conv_kernels(model, save_dir=None):
     
     encoder_type = getattr(encoder, "encoder_type", None)
     is_linear = getattr(encoder, "linear_encoder", False)
-    if encoder_type not in ("conv", "conv_spatial") or is_linear:
+    if encoder_type not in ("conv_spatial", "conv_spatiotemporal", "conv1d_temporal") or is_linear:
         raise ValueError(
             f"Encoder is not a conv encoder or is using linear encoding. "
             f"encoder_type: {encoder_type}, linear_encoder: {is_linear}"
@@ -137,6 +136,8 @@ def DCA_init(X, T, d, n_init=1, rng_or_seed=None):
     """
     Initialize a Dynamical Components Analysis (DCA) projection matrix.
 
+    Requires the optional dependency: install with ``pip install cpic[dca]``.
+
     Parameters
     ----------
     X : ndarray
@@ -155,6 +156,13 @@ def DCA_init(X, T, d, n_init=1, rng_or_seed=None):
     V_dca : ndarray
         Learned DCA projection matrix of shape [n_features, d].
     """
+    try:
+        import dca as DCA
+    except ImportError:
+        raise ImportError(
+            "DCA_init requires the DynamicalComponentsAnalysis package. "
+            "Install it with: pip install cpic[dca]"
+        ) from None
     opt = DCA.DynamicalComponentsAnalysis(T=T, rng_or_seed=rng_or_seed)
     opt.estimate_data_statistics(X)
     opt.fit_projection(d=d, n_init=n_init)

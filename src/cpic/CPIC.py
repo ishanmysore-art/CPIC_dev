@@ -363,11 +363,16 @@ class CPIC(nn.Module):
             print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}")
             if writer:
                 writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
-                for name, fn in stats.items():                    
-                    writer.add_scalar(f"epoch/I_compress/{name}", fn(I_compress_bound_by_epoch), global_step=epoch) 
-                    writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
-                writer.add_histogram("epoch/I_compress_dist", np.array(I_compress_bound_by_epoch), epoch)
-                writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
+                
+                if len(I_compress_bound_by_epoch) > 0:
+                    for name, fn in stats.items():                    
+                        writer.add_scalar(f"epoch/I_compress/{name}", fn(I_compress_bound_by_epoch), global_step=epoch) 
+                    writer.add_histogram("epoch/I_compress_dist", np.array(I_compress_bound_by_epoch), epoch)
+
+                if len(I_predictive_bound_by_epoch) > 0:
+                    for name, fn in stats.items():                    
+                        writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
+                    writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
 
             if mean_loss < best_loss:
                 best_loss = mean_loss
@@ -380,8 +385,8 @@ class CPIC(nn.Module):
                     print("Early stopping...")
                     break
 
-        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder
-        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal') and not self.encoder.linear_encoder:
+        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or Conv1dTemporalEncoder
+        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv1d_temporal') and not self.encoder.linear_encoder:
             if signature is not None:
                 if kernel_save_suffix is not None:
                     kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"

@@ -25,7 +25,7 @@ classifiers = [
     "Operating System :: OS Independent"
 ]
 dependencies = [
-  "numpy>=1.19.5,<1.24",
+  "numpy>=1.19.5",
   "scipy",
   "h5py",
   "pandas",
@@ -34,11 +34,16 @@ dependencies = [
   "torch",
   "torchvision",
   "tensorboardX",
-  "DynamicalComponentsAnalysis",
   "tqdm",
   "sdepy",
   "notebook",
   "pytest",
+]
+
+[project.optional-dependencies]
+dca = [
+  "DynamicalComponentsAnalysis",
+  "numpy>=1.19.5,<2",
 ]
 
 [project.urls]

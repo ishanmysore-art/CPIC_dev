@@ -2,8 +2,7 @@ import torch
 from cpic.models import StructuredEncoder
 
 
-# Run these tests from the repo root with:
-#   pytest -q
+# Run these tests from the repo root with pytest -q
 def make_input(batch_size: int = 2, T: int = 5, D: int = 8) -> torch.Tensor:
     """Create a dummy input of shape (batch, T, D)."""
     return torch.randn(batch_size, T, D)
