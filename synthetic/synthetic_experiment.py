@@ -1,5 +1,6 @@
 from cpic import CPIC
-from utils import PastFutureDataset, DCA_init
+from cpic.utils.data import PastFutureDataset
+from cpic.utils.helpers import DCA_init
 from utils.data_util import linear_alignment, compute_R2
 import torch
 from tensorboardX import SummaryWriter
@@ -115,10 +116,14 @@ if __name__ == "__main__":
         config_file = './config/config_lorenz_stochastic_infonce_exploration.ini'
     elif args.config == 'lorenz_stochastic_infonce_obs_exploration':
         config_file = './config/config_lorenz_stochastic_infonce_obs_exploration.ini'
-    elif args.config == 'lorenz_stochastic_infonce_obs_exploration_conv':
-        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration_conv.ini'
-    elif args.config == 'lorenz_stochastic_infonce_exploration_conv':
-        config_file = './config/config_lorenz_stochastic_infonce_exploration_conv.ini'
+    elif args.config == 'lorenz_stochastic_infonce_obs_exploration_conv_s':
+        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration_conv_s.ini'
+    elif args.config == 'lorenz_stochastic_infonce_obs_exploration_conv_st':
+        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration_conv_st.ini'
+    elif args.config == 'lorenz_stochastic_infonce_obs_exploration_conv_t':
+        config_file = './config/config_lorenz_stochastic_infonce_obs_exploration_conv_t.ini'
+    elif args.config == 'lorenz_stochastic_infonce_exploration_conv_s':
+        config_file = './config/config_lorenz_stochastic_infonce_exploration_conv_s.ini'
     else:
         raise ValueError("{} has not been implemented!".format(args.config))
 
@@ -225,13 +230,28 @@ if __name__ == "__main__":
                               batch_size=batch_size, 
                               lr=lr, 
                               early_stop=num_early_stop, 
-                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
-                    
-        encoded_mean = cpic.encode(torch.from_numpy(X_noisy).to(device))
-        X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)
+                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)),
+                              kernel_save_suffix=args.config,
+                              signature=args.seed)
+
+        encoder_type = getattr(cpic.encoder, "encoder_type", None)
+        X_true_r2 = X_dynamics
+        if encoder_type == "conv_spatiotemporal":
+            past_windows = np.stack([X_noisy[t - T:t] for t in range(T, len(X_noisy))], axis=0) # (N-T, T, xdim)
+            past_tensor = torch.from_numpy(past_windows).to(device)
+            center_indices = [t - 1 for t in range(T, len(X_noisy))] # last index of each past window
+            X_true_r2 = X_dynamics[center_indices]
+
+            encoded_windows = cpic.encode(past_tensor) # (N-T, T, ydim)
+            encoded_repr = encoded_windows[:, -1, :] # (N-T, ydim)
+            X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_repr.cpu().detach().numpy(), X_true_r2)
+        else:
+            encoded_mean = cpic.encode(torch.from_numpy(X_noisy).to(device))
+            X_CPIC_trans = aligned_encoded_mean = linear_alignment(encoded_mean.cpu().detach().numpy(), X_dynamics)
+
         R2_PCA = compute_R2(X_pca_trans, X_dynamics)
         R2_DCA = compute_R2(X_dca_trans, X_dynamics)
-        R2_CPIC = compute_R2(aligned_encoded_mean, X_dynamics)
+        R2_CPIC = compute_R2(aligned_encoded_mean, X_true_r2)
         print("R2(PCA): {}, R2(DCA): {}, R2(CPIC): {}".format(R2_PCA, R2_DCA, R2_CPIC))
         R2_metrics.append([R2_PCA, R2_DCA, R2_CPIC])
         losses.append(loss)

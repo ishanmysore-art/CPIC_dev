@@ -3,6 +3,7 @@ __pycache__
 *.pkl
 **/tensor_logs
 .idea/*
+.vscode/
 *.egg-info/
 dist/*
 *.pyc
@@ -11,3 +12,10 @@ dist/*
 **/fig
 **/res
 **/data
+**/.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.so

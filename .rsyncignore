@@ -9,3 +9,9 @@ dist
 *.egg-info
 logs
 res
+*.hdf5
+*.pkl
+**/tensor_logs
+**/fig
+**/data
+.DS_Store

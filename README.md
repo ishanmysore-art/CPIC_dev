@@ -1,15 +1,27 @@
 # Compressed Predictive Information Coding 
 This repo is used to publish the code for Compressed Predictive Information Coding (CPIC) methodology.
 
-## Preinstall Pacakages
-CPIC requests the pre-installation of DCA package for initialization. Please refer to https://dynamicalcomponentsanalysis.readthedocs.io/en/latest/index.html.
+## Installation
+
+Install CPIC with:
+```bash
+pip install cpic
+```
+
+For **DCA initialization** (e.g. `DCA_init`, `load_sabes_data`): install the optional dependency:
+```bash
+pip install "cpic[dca]"
+```
+(Quotes are required in zsh so `[dca]` is not interpreted as a glob.) This installs DynamicalComponentsAnalysis and pins NumPy<2 for compatibility. See https://dynamicalcomponentsanalysis.readthedocs.io/en/latest/index.html.
 
 ## Code
 
 ### Main Code
 1. Main code:
    1. CPIC code: <code>src/cpic/CPIC.py</code>
-   2. utility code: <code>src/cpic/utils.py/</code>
+   2. Encoders, Critics, Baselines: <code>src/cpic/models.py</code>
+   3. Mutual information estimation: <code>src/cpic/mi.py</code>
+   4. utility code: <code>src/cpic/utils/</code>
 
 ### Synthetic Experiments
 
@@ -28,6 +40,18 @@ CPIC requests the pre-installation of DCA package for initialization. Please ref
    1. Real data experiments with CPIC for four datasets including M1, HC, Temp, MS using <code>real_data_experiment_standard.py</code>, <code>real_data_experiment_standard_beta.py</code>. Note that beta refers to varying weight option.
    2. Real data experiments with other models using <code>real_data_competitors.py</code>.
    3. Real data experiments post analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>.
+
+## Encoder types
+CPIC supports multiple encoder architectures via <code>encoder_params["encoder_type"]</code>. All encoders map input (T x D) to output (T x M). Unless specified otherwise, <code>deterministic</code> defaults to <code>False</code>. Example configurations:
+
+- **Linear**: <code>{"encoder_type": "linear"}</code>
+- **MLP**: <code>{"encoder_type": "mlp", "n_layers": 1, "activation": "relu"}</code>
+- **2x MLP**: <code>{"encoder_type": "mlp2"}</code>
+- **Conv (spatial only)**: <code>{"encoder_type": "conv_spatial"}</code> or <code>"conv"</code>, with optional <code>n_layers</code>, <code>conv_kernel_size</code>, <code>conv_stride</code>, <code>conv_padding</code>
+- **Conv (spatiotemporal)**: <code>{"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3, "conv_stride": 1}</code>
+- **1D temporal Conv**: <code>{"encoder_type": "conv1d_temporal", "kernel_size_1d": 3, "n_layers": 1}</code>
+
+Pass <code>encoder_params</code> when constructing CPIC, and when calling <code>fit()</code> the encoder is built from the registry.
 
 ## Configuration
 Synthetic experiment configurations for CPIC are available in <code>synthetic/config/\*</code>. Real data experiment configurations for CPIC are available in <code>analysis/config/\*</code>.

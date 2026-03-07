@@ -8,7 +8,7 @@ name = "cpic"
 version = "0.1.0"
 description = "Compressed Predictive Information Coding"
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.10"
 authors = [
     { name = "Rui Meng", email = "mengrui6351@gmail.com" }
 ]
@@ -20,10 +20,12 @@ maintainers = [
 license = { file = "LICENSE.txt" }
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Operating System :: OS Independent"
 ]
 dependencies = [
-  "numpy>=1.19.5,<1.24",
+  "numpy>=1.19.5",
   "scipy",
   "h5py",
   "pandas",
@@ -32,9 +34,16 @@ dependencies = [
   "torch",
   "torchvision",
   "tensorboardX",
-  "DynamicalComponentsAnalysis",
   "tqdm",
   "sdepy",
+  "notebook",
+  "pytest",
+]
+
+[project.optional-dependencies]
+dca = [
+  "DynamicalComponentsAnalysis",
+  "numpy>=1.19.5,<2",
 ]
 
 [project.urls]
