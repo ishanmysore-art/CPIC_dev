@@ -3,6 +3,31 @@ This repo is used to publish the code for Compressed Predictive Information Codi
 
 ## Installation
 
+### Using uv (recommended)
+
+The project is set up for [uv](https://docs.astral.sh/uv/). From the repo root:
+
+```bash
+# Create a virtual environment and install the package and dependencies (editable)
+uv sync
+
+# Include dev dependencies (e.g. pytest)
+uv sync --dev
+
+# Include the optional DCA extra (DynamicalComponentsAnalysis, NumPy<2)
+uv sync --extra dca
+```
+
+Run code with:
+```bash
+uv run python your_script.py
+uv run pytest
+```
+
+A `.python-version` file (3.10) and `uv.lock` are included for consistent installs.
+
+### Using pip
+
 Install CPIC with:
 ```bash
 pip install cpic

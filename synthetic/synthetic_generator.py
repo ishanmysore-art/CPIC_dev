@@ -141,7 +141,7 @@ def embedded_lorenz_cross_cov_mats(N, T, snr=1., noise_dim=7, return_samples=Fal
         return cross_cov_mats
 
 
-def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
+def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42, RESULTS_FILENAME=None):
     """
     :param T: window size of DCA
     :param N: dimension of observations
@@ -149,6 +149,7 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
     :param snr_vals: signal-noise ratio
     :param num_samples: number os time stamps
     :param random_seed: random seed
+    :param RESULTS_FILENAME: filename to save the results
     :return:
     """
     np.random.seed(random_seed)
@@ -244,30 +245,13 @@ def generate_syn(T, N, noise_dim, snr_vals, num_samples=10000, random_seed=42):
             X_dca_trans_dset[snr_idx] = X_dca_trans
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='synthetic data generation.')
-    parser.add_argument('--seed', type=int, default=22) # original seed = 42
-    parser.add_argument('--RESULTS_FILENAME', type=str, default="../synthetic/data/lorenz/lorenz_exploration.hdf5", help="the files can be "
-                                                                                                               "../synthetic/data/lorenz/lorenz_exploration.hdf5 or ../synthetic/data/lorenz/lorenz_results.hdf5")
-    args = parser.parse_args()
-    seed = args.seed
-    np.random.seed(seed)
-    RESULTS_FILENAME = args.RESULTS_FILENAME
-    do_vis = False
-
-    # Set parameters
-    T = 4
-    N = 30
-    noise_dim = 5
-    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_results.hdf5":
-        snr_vals = np.array([0.01, 0.02, 0.05, 0.1, 1])
-    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_exploration.hdf5":
-        snr_vals = np.logspace(-3.0, -1.0, num=10)
-
-    # generate data
-    generate_syn(T, N, noise_dim, snr_vals, random_seed=seed)
-
-    # load data and plot
+def load_and_plot_data(RESULTS_FILENAME, do_vis=False):
+    """
+    Load the data from the results file and plot the data.
+    :param RESULTS_FILENAME: filename to load the results
+    :param do_vis: whether to plot the data
+    :return:
+    """
     with h5py.File(RESULTS_FILENAME, "r") as f:
         snr_vals = f.attrs["snr_vals"][:]
         X = f["X"][:]
@@ -303,10 +287,40 @@ if __name__ == "__main__":
                 plt.title("Embedded dynamics by DCA, SNR={}".format(snr_vals[snr_idx]))
                 plt.show()
 
-    # plot R2 scores
-    r2_dca = r2_vals[:, 1]
-    fig = plt.figure()
-    plt.plot(snr_vals, r2_dca, label="DCA")
-    plt.legend()
-    plt.show()
-    
+    if do_vis and len(snr_vals) > 1:
+        # plot R2 scores
+        r2_dca = r2_vals[:, 1]
+        fig = plt.figure()
+        plt.plot(snr_vals, r2_dca, label="DCA")
+        plt.legend()
+        plt.show()
+        plt.close(fig)
+    else:
+        print("No plot for R2 scores")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='synthetic data generation.')
+    parser.add_argument('--seed', type=int, default=22) # original seed = 42
+    parser.add_argument('--RESULTS_FILENAME', type=str, default="../synthetic/data/lorenz/lorenz_exploration.hdf5", help="the files can be "
+                                                                                                               "../synthetic/data/lorenz/lorenz_exploration.hdf5 or ../synthetic/data/lorenz/lorenz_results.hdf5")
+    args = parser.parse_args()
+    seed = args.seed
+    np.random.seed(seed)
+    RESULTS_FILENAME = args.RESULTS_FILENAME
+    do_vis = False
+
+    # Set parameters
+    T = 4
+    N = 30
+    noise_dim = 5
+    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_results.hdf5":
+        snr_vals = np.array([0.01, 0.02, 0.05, 0.1, 1])
+    if RESULTS_FILENAME == "../synthetic/data/lorenz/lorenz_exploration.hdf5":
+        snr_vals = np.logspace(-3.0, -1.0, num=10)
+
+    # generate data
+    generate_syn(T, N, noise_dim, snr_vals, random_seed=seed, RESULTS_FILENAME=RESULTS_FILENAME)
+
+    # load data and plot
+    load_and_plot_data(RESULTS_FILENAME, do_vis=do_vis)
