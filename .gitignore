@@ -20,3 +20,6 @@ dist/*
 .coverage
 htmlcov/
 *.so
+
+# synthetic data
+synthetic/data/

@@ -101,9 +101,6 @@ class ConvSpatialEncoder(nn.Module):
             conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
             conv_layers.append(activation_f)
         
-        # conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0)))
-        # final_num_features = conv_spatial_output_dim(final_num_features, kernel_size, stride, padding)
-        
         # dimension of the flattened output of the conv layers (before the linear layer)
         flattened_dim = hidden_dim * final_num_features
         if flattened_dim < 0:
@@ -191,9 +188,6 @@ class ConvSpatiotemporalEncoder(nn.Module):
             
             conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
             conv_layers.append(activation_f)
-
-        # conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size_feat, kernel_size_time), stride=(stride_feat, stride_time), padding=(padding_feat, padding_time)))
-        # h_out, w_out = conv_spatiotemporal_output_dim(h_out, w_out, kernel_size_feat, kernel_size_time, stride_feat, stride_time, padding_feat, padding_time)
 
         flattened_dim = hidden_dim * h_out * w_out
         if flattened_dim < 0:
