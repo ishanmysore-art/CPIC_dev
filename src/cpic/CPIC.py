@@ -385,8 +385,8 @@ class CPIC(nn.Module):
                     print("Early stopping...")
                     break
 
-        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or Conv1dTemporalEncoder
-        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv1d_temporal') and not self.encoder.linear_encoder:
+        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or ConvTemporalEncoder
+        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv_temporal') and not self.encoder.linear_encoder:
             if signature is not None:
                 if kernel_save_suffix is not None:
                     kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"

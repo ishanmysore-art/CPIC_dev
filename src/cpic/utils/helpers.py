@@ -42,23 +42,34 @@ def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):
 
 def _extract_conv_layers(module):
     """
-    Extract all Conv2d layers from a module.
-    
-    Parameters
-    ----------
-    module : nn.Module
-        Module to extract Conv2d layers from
-
-    Returns
-    -------
-    layers : list
-        List of Conv2d layers
+    Extract all Conv2d and Conv1d layers from a module (in order).
     """
     layers = []
     for m in module.modules():
-        if isinstance(m, nn.Conv2d):
+        if isinstance(m, (nn.Conv2d, nn.Conv1d)):
             layers.append(m)
     return layers
+
+
+def _visualize_kernel_layer_1d(layer, layer_idx, save_dir, type='mean'):
+    """
+    Visualize kernels for a single Conv1d layer.
+    Weight shape (out_channels, in_channels, kernel_size) -> heatmap (out_ch, kernel_size).
+    """
+    kernels = layer.weight.detach().clone().cpu()
+    # average over in_channels: (out_ch, kernel_size)
+    kernels = kernels.mean(dim=1).numpy()
+    kernels = kernels - kernels.min()
+    if kernels.max() != 0:
+        kernels = np.abs(kernels / kernels.max())
+    plt.figure()
+    plt.imshow(kernels, cmap='gist_gray', aspect='auto')
+    plt.colorbar()
+    plt.title(f'{type} Layer {layer_idx} (Conv1d) - {kernels.shape[0]} filters')
+    plt.xlabel('kernel tap')
+    plt.ylabel('filter')
+    plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
+    plt.close()
 
 
 def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
@@ -111,7 +122,7 @@ def visualize_conv_kernels(model, save_dir=None):
     
     encoder_type = getattr(encoder, "encoder_type", None)
     is_linear = getattr(encoder, "linear_encoder", False)
-    if encoder_type not in ("conv_spatial", "conv_spatiotemporal", "conv1d_temporal") or is_linear:
+    if encoder_type not in ("conv_spatial", "conv_spatiotemporal", "conv_temporal") or is_linear:
         raise ValueError(
             f"Encoder is not a conv encoder or is using linear encoding. "
             f"encoder_type: {encoder_type}, linear_encoder: {is_linear}"
@@ -120,16 +131,19 @@ def visualize_conv_kernels(model, save_dir=None):
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
-    # visualize mean encoder layers
     mean_layers = _extract_conv_layers(encoder._mean)
     for idx, layer in enumerate(mean_layers):
-        _visualize_kernel_layer(layer, idx, save_dir, 'mean')
-    
-    # visualize std encoder layers
+        if isinstance(layer, nn.Conv1d):
+            _visualize_kernel_layer_1d(layer, idx, save_dir, 'mean')
+        else:
+            _visualize_kernel_layer(layer, idx, save_dir, 'mean')
     if not encoder.deterministic:
         std_layers = _extract_conv_layers(encoder._logvars)
         for idx, layer in enumerate(std_layers):
-            _visualize_kernel_layer(layer, idx, save_dir, 'std')
+            if isinstance(layer, nn.Conv1d):
+                _visualize_kernel_layer_1d(layer, idx, save_dir, 'std')
+            else:
+                _visualize_kernel_layer(layer, idx, save_dir, 'std')
 
 
 def DCA_init(X, T, d, n_init=1, rng_or_seed=None):

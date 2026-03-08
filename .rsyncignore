@@ -8,7 +8,8 @@ dist
 .git
 *.egg-info
 logs
-res
+**/res
+**/kernel_visualizations
 *.hdf5
 *.pkl
 **/tensor_logs

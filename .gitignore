@@ -11,6 +11,7 @@ dist/*
 **/.DS_Store
 **/fig
 **/res
+**/kernel_visualizations
 **/data
 **/.ipynb_checkpoints/
 .pytest_cache/

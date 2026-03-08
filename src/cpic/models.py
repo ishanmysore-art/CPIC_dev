@@ -8,7 +8,8 @@ Encoders
 
 def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None):
     """
-    Multi-layer perceptron.
+    Multi-layer perceptron. 
+    Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
 
     Parameters
     ----------
@@ -45,6 +46,7 @@ def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
 class ConvSpatialEncoder(nn.Module):
     """
     2D convolutional encoder that convolves over features (spatial dimension)
+    Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
 
     Parameters
     ----------
@@ -69,7 +71,6 @@ class ConvSpatialEncoder(nn.Module):
     """
     def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
         super().__init__()
-        # input shape: (batch, 1, input_dim, length) - reshape_for_conv will handle this
 
         # helper function to compute output dimension of a conv layer
         # will let us figure out the final size of input to the linear layer
@@ -114,16 +115,16 @@ class ConvSpatialEncoder(nn.Module):
         self.linear = nn.Linear(self.flattened_dim, self.output_dim)
 
     def forward(self, x):
+        # input shape: (batch, 1, input_dim, T) - reshape_for_conv will handle this
         out = self.conv_seq(x)
 
         if out.shape[2] * out.shape[1] != self.flattened_dim:
             raise ValueError(f"output.shape[2] * output.shape[1] != flattened_dim: {out.shape[2] * out.shape[1]} != {self.flattened_dim}")
 
-        out = out.permute(0, 3, 1, 2)
-        out = torch.flatten(out, start_dim=2)
-        out = self.linear(out)
+        out = out.permute(0, 3, 1, 2) # (batch, channels, hidden_dim, T) -> (batch, T, channels, hidden_dim)
+        out = torch.flatten(out, start_dim=2) # (batch, T, channels, hidden_dim) -> (batch, T, channels * hidden_dim)
+        out = self.linear(out) # output shape: (batch, T, output_dim)
 
-        # output shape: (batch, T, output_dim)
         # if T is 1, change output to (batch, output_dim)
         if out.shape[1] == 1:
             out = out.squeeze(1)
@@ -210,11 +211,10 @@ class ConvSpatiotemporalEncoder(nn.Module):
         # input shape: (batch, 1, input_dim, T)
         out = self.conv_seq(x)
         B, C, H, W = out.shape
-        out = out.permute(0, 2, 3, 1).reshape(B, -1)
-        out = self.linear(out)
-        out = out.view(B, self.out_T, self.output_dim)
+        out = torch.flatten(out, start_dim=1) # (batch, channels, hidden_dim, T) -> (batch, channels * hidden_dim * T) = (B, flattened_dim)
+        out = self.linear(out) # (batch, output_dim * out_T)
+        out = out.view(B, self.out_T, self.output_dim) # output shape: (batch, T, output_dim)
 
-        # output shape: (batch, T, output_dim)
         # if T is 1, change output to (batch, output_dim)
         if out.shape[1] == 1:
             out = out.squeeze(1)
@@ -222,9 +222,10 @@ class ConvSpatiotemporalEncoder(nn.Module):
         return out
     
 
-class TemporalConv1dEncoder(nn.Module):
+class ConvTemporalEncoder(nn.Module):
     """
-    1D temporal convolution along the time axis. Input (batch, T, D) -> output (batch, T, M).
+    1D temporal convolution along the time axis. 
+    Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
 
     Parameters
     ----------
@@ -263,19 +264,18 @@ class TemporalConv1dEncoder(nn.Module):
         self.linear = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
-        # reshape input to (batch, time, features)
-        if x.ndim == 2:
-            x = x.unsqueeze(1)
-        x = x.permute(0, 2, 1) # (batch, features, time) -> (batch, time, features)
+        # input shape: (batch, 1, features, time)
+        # Conv1d wants (batch, features (channels), time), so
+        x = x.squeeze(1)  # (batch, 1, D, T) -> (batch, D, T)
 
-        out = self.conv_seq(x)
-        out = out.permute(0, 2, 1)
-        out = self.linear(out)
+        out = self.conv_seq(x) # (batch, hidden_dim, T)
+        out = out.permute(0, 2, 1) # (batch, T, hidden_dim) for linear
+        out = self.linear(out) # output shape: (batch, T, output_dim)
 
-        # output shape: (batch, T, output_dim)
         # if T is 1, change output to (batch, output_dim)
         if out.shape[1] == 1:
             out = out.squeeze(1)
+
         return out
 
 
@@ -350,11 +350,11 @@ def _conv_spatiotemporal_encoder_factory(input_dim, hidden_dim, output_dim, T=No
     )
 
 
-def _conv1d_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+def _conv_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
     kernel_size = kwargs.get("kernel_size_1d", kwargs.get("conv_kernel_size", 3))
     n_layers = kwargs.get("n_layers", 1)
     activation = kwargs.get("activation", "relu")
-    return TemporalConv1dEncoder(
+    return ConvTemporalEncoder(
         input_dim, hidden_dim, output_dim,
         kernel_size=kernel_size,
         n_layers=n_layers,
@@ -366,24 +366,23 @@ def _conv1d_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, 
 #   encoder_params = {"encoder_type": "mlp2"}
 #   encoder_params = {"encoder_type": "conv_spatial", "conv_kernel_size": 3}
 #   encoder_params = {"encoder_type": "conv_spatiotemporal", "kernel_size_feat": 3, "kernel_size_time": 3}
-#   encoder_params = {"encoder_type": "conv1d_temporal", "kernel_size": 3}
+#   encoder_params = {"encoder_type": "conv_temporal", "kernel_size": 3}
 ENCODERS = {
     "linear": _linear_encoder_factory,
     "mlp": _mlp_encoder_factory,
     "mlp2": _mlp_x2_encoder_factory,
     "conv_spatial": _conv_spatial_encoder_factory,
     "conv_spatiotemporal": _conv_spatiotemporal_encoder_factory,
-    "conv1d_temporal": _conv1d_temporal_encoder_factory,
+    "conv_temporal": _conv_temporal_encoder_factory,
 }
 
 ENCODER_INPUT_SHAPE = {
     "linear": "flat",
     "mlp": "flat",
     "mlp2": "flat",
-    "conv": "conv2d",
-    "conv_spatial": "conv2d",
-    "conv_spatiotemporal": "conv2d",
-    "conv1d_temporal": "flat",
+    "conv_spatial": "conv",
+    "conv_spatiotemporal": "conv",
+    "conv_temporal": "conv",
 }
 
 
@@ -507,7 +506,7 @@ class StructuredEncoder(nn.Module):
 
     def forward(self, x):
         # handle input shape for conv vs mlp
-        if self._input_shape == "conv2d" and not self.linear_encoder:
+        if self._input_shape == "conv" and not self.linear_encoder:
             # for conv, input should be (batch, 1, features, time))
             x_processed = self.reshape_for_conv(x)
         else:
@@ -524,7 +523,7 @@ class StructuredEncoder(nn.Module):
 
     def get_logvars(self, x):
         # handle input shape for conv vs mlp
-        if self._input_shape == "conv2d" and not self.linear_encoder:
+        if self._input_shape == "conv" and not self.linear_encoder:
             x_processed = self.reshape_for_conv(x)
         else:
             # for mlp or linear, no shape transformation needed
@@ -533,7 +532,7 @@ class StructuredEncoder(nn.Module):
 
     def get_mean(self, x):
         # handle input shape for conv vs mlp
-        if self._input_shape == "conv2d" and not self.linear_encoder:
+        if self._input_shape == "conv" and not self.linear_encoder:
             x_processed = self.reshape_for_conv(x)
         else:
             x_processed = x

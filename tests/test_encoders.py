@@ -84,9 +84,9 @@ def test_conv_spatiotemporal_encoder_shapes():
     )
 
 
-def test_conv1d_temporal_encoder_shapes():
+def test_conv_temporal_encoder_shapes():
     _assert_mean_logvar_shapes(
-        "conv1d_temporal",
+        "conv_temporal",
         n_layers=1,
         kernel_size_1d=3,
         activation="relu",
@@ -119,11 +119,9 @@ def test_encoder_registry_forward_passes():
         "linear",
         "mlp",
         "mlp2",
-        "mlp_x2",
-        "conv",
         "conv_spatial",
         "conv_spatiotemporal",
-        "conv1d_temporal",
+        "conv_temporal",
     ]
 
     batch_size, T, D, M = 2, 5, 8, 4

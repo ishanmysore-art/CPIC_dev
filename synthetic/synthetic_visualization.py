@@ -1,3 +1,4 @@
+import argparse
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,91 +27,84 @@ def collect_data(saved_root, num_init):
 
 
 if __name__ == "__main__":
-    num_init = 100
+    parser = argparse.ArgumentParser(description="Visualize synthetic CPIC results.")
+    parser.add_argument(
+        "--num_init",
+        type=int,
+        default=100,
+        help="Number of initialization seeds to aggregate (default: 100)",
+    )
+    args = parser.parse_args()
+    num_init = args.num_init
     snr_vals = np.logspace(-3, -1, num=10)
 
-    with open("res/lorenz_dca/latent_R2_{}.pkl".format(num_init), "rb") as f:
-        res = pickle.load(f)
-    R2_DCAs = res["R2_DCAs"]
-    best_R2_DCAs = res["best_R2_DCAs"]
-    R2_DCAs_mean = np.mean(R2_DCAs, axis=0)
-    R2_DCAs_std = np.std(R2_DCAs, axis=0)
+    # with open("res/lorenz_dca/latent_R2_{}.pkl".format(num_init), "rb") as f:
+    #     res = pickle.load(f)
+    # R2_DCAs = res["R2_DCAs"]
+    # best_R2_DCAs = res["best_R2_DCAs"]
+    # R2_DCAs_mean = np.mean(R2_DCAs, axis=0)
+    # R2_DCAs_std = np.std(R2_DCAs, axis=0)
 
 
-    # collect the CPIC data.
+    # collect the CPIC results.
     R2_CPICs_mean, R2_CPICs_std, R2_CPICs_opt = collect_data("res/lorenz_stochastic_infonce_exploration", num_init)
     R2_CPICs_obs_mean, R2_CPICs_obs_std, R2_CPICs_obs_opt = collect_data("res/lorenz_stochastic_infonce_obs_exploration", num_init)
     R2_CPICs_det_mean, R2_CPICs_det_std, R2_CPICs_det_opt = collect_data("res/lorenz_deterministic_infonce_exploration", num_init)
     R2_CPICs_det_obs_mean, R2_CPICs_det_obs_std, R2_CPICs_det_obs_opt = collect_data("res/lorenz_deterministic_infonce_obs_exploration", num_init)
     
-    # collect the CPIC conv data (not using the function since it's a special case)
-    R2_CPICs_conv = list()
-    loss_CPICs_conv = list()
-    saved_root_conv = "res/lorenz_stochastic_infonce_exploration_conv"
-    for i in range(num_init):
-        with open(saved_root_conv + "/latent_R2_seed{}.pkl".format(i), "rb") as f:
-            res = pickle.load(f)
-        R2_metrics = res["R2_metrics"]
-        R2_CPICs_conv.append(R2_metrics)
-        losses = res["losses"]
-        loss_CPICs_conv.append(losses)
-    R2_CPICs_conv = np.stack(R2_CPICs_conv)[:,:,-1]
-    loss_CPICs_conv = np.stack(loss_CPICs_conv)
-    
-    R2_CPICs_mean_conv = np.mean(R2_CPICs_conv, axis=0)
-    R2_CPICs_std_conv = np.std(R2_CPICs_conv, axis=0)
-    R2_CPICs_opt_conv = list()
-    for idx, idx_min in enumerate(np.argmin(loss_CPICs_conv, axis=0)):
-        R2_CPICs_opt_conv.append(R2_CPICs_conv[idx_min, idx])
+    # collect the CPIC conv results
+    R2_CPICs_obs_mean_conv_s, R2_CPICs_obs_std_conv_s, R2_CPICs_obs_opt_conv_s = collect_data("res/lorenz_stochastic_infonce_obs_exploration_conv_s", num_init)
+    R2_CPICs_obs_mean_conv_st, R2_CPICs_obs_std_conv_st, R2_CPICs_obs_opt_conv_st = collect_data("res/lorenz_stochastic_infonce_obs_exploration_conv_st", num_init)
+    R2_CPICs_obs_mean_conv_t, R2_CPICs_obs_std_conv_t, R2_CPICs_obs_opt_conv_t = collect_data("res/lorenz_stochastic_infonce_obs_exploration_conv_t", num_init)
 
 
-    fig = plt.figure(figsize=(5,5))
-    # plt.plot(snr_vals, best_R2_DCAs, color="black", label="DCA")
-    plt.plot(snr_vals, R2_CPICs_obs_opt, color="red", linestyle="dashed", label="Stochastic CPIC(O)")
-    # plt.plot(snr_vals, R2_CPICs_obs_conv_opt, color="red", linestyle="dotted", label="Stochastic CPIC(O, Conv)")
-    plt.plot(snr_vals, R2_CPICs_opt, color="red", label="Stochastic CPIC(L)")
-    plt.plot(snr_vals, R2_CPICs_det_obs_opt, color="blue", linestyle="dashed", label="Deterministic CPIC(O)")
-    plt.plot(snr_vals, R2_CPICs_det_opt, color="blue", label="Deterministic CPIC(L)")
+    fig = plt.figure(figsize=(8, 5))
+    ax = fig.add_subplot(111)
+    # ax.plot(snr_vals, best_R2_DCAs, color="black", label="DCA")
+    ax.plot(snr_vals, R2_CPICs_obs_opt, color="red", linestyle="dashed", label="Stochastic CPIC(O)")
+    ax.plot(snr_vals, R2_CPICs_opt, color="red", label="Stochastic CPIC(L)")
+    ax.plot(snr_vals, R2_CPICs_det_obs_opt, color="blue", linestyle="dashed", label="Deterministic CPIC(O)")
+    ax.plot(snr_vals, R2_CPICs_det_opt, color="blue", label="Deterministic CPIC(L)")
+    ax.plot(snr_vals, R2_CPICs_obs_opt_conv_s, color="green", linestyle="dashed", label="Stochastic CPIC(O, ConvSpatial)")
+    ax.plot(snr_vals, R2_CPICs_obs_opt_conv_st, color="orange", linestyle="dashed", label="Stochastic CPIC(O, ConvSpatiotemporal)")
+    ax.plot(snr_vals, R2_CPICs_obs_opt_conv_t, color="purple", linestyle="dashed", label="Stochastic CPIC(O, ConvTemporal)")
 
-    plt.xscale('log')
-    plt.xlabel('Signal-to-noise ratio (SNR)', fontsize=18)
-    plt.ylabel('R\u00b2 regression score', fontsize=18)
-    plt.yticks(np.array([0.4, 0.7, 1.0]), fontsize=18)
-    plt.xticks(fontsize=18)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("fig/R2_lorenz_best_{}.png".format(num_init))
+    ax.set_xscale('log')
+    ax.set_xlabel('Signal-to-noise ratio (SNR)', fontsize=18)
+    ax.set_ylabel('R\u00b2 regression score', fontsize=18)
+    ax.set_yticks(np.array([0.4, 0.7, 1.0]))
+    ax.tick_params(axis='both', labelsize=18)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=10)
+    plt.subplots_adjust(right=0.58)
+    plt.savefig("fig/R2_lorenz_best_{}.png".format(num_init), bbox_inches="tight")
     plt.show()
 
 
-    fig = plt.figure(figsize=(5,5))
-    plt.plot(snr_vals, R2_DCAs_mean, color="black", label="DCA")
-    plt.errorbar(snr_vals, R2_DCAs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_DCAs_std, c="black")
-    
-    plt.plot(snr_vals, R2_CPICs_obs_mean, linestyle="dashed", color="red", label="Stochastic CPIC(O)")
-    # plt.errorbar(snr_vals, R2_CPICs_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std,
-    #              c="red")
-    # plt.plot(snr_vals, R2_CPICs_obs_conv_mean, linestyle="dotted", color="red", label="Stochastic CPIC(O, Conv)")
-    # plt.errorbar(snr_vals, R2_CPICs_obs_conv_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_conv_std,
-    #              c="red")
-    plt.plot(snr_vals, R2_CPICs_mean, color="red", label="Stochastic CPIC(L)")
-    # plt.errorbar(snr_vals, R2_CPICs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std,
-    #              c="red")
-    plt.plot(snr_vals, R2_CPICs_mean_conv, linestyle="--", alpha=0.7, color="green", label="Stochastic CPIC(L, Conv)")
-    # plt.errorbar(snr_vals, R2_CPICs_mean_conv, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std_conv,
-    #              c="red")
-    plt.plot(snr_vals, R2_CPICs_det_obs_mean, linestyle="dashed", color="blue", label="Deterministic CPIC(O)")
-    plt.errorbar(snr_vals, R2_CPICs_det_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_det_obs_std, c="blue")
-    
-    plt.plot(snr_vals, R2_CPICs_det_mean, color="blue", label="Deterministic CPIC(L)")
-    plt.errorbar(snr_vals, R2_CPICs_det_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_det_std, c="blue")
-    
-    plt.xscale('log')
-    plt.xlabel('Signal-to-noise ratio (SNR)', fontsize=18)
-    plt.ylabel('R\u00b2 regression score', fontsize=18)
-    plt.yticks(np.array([0.4, 0.7, 1.0]), fontsize=18)
-    plt.xticks(fontsize=18)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("fig/R2_lorenz_mean_{}.png".format(num_init))
+    fig = plt.figure(figsize=(8, 5))
+    ax = fig.add_subplot(111)
+    # ax.plot(snr_vals, R2_DCAs_mean, color="black", label="DCA")
+    # ax.errorbar(snr_vals, R2_DCAs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_DCAs_std, c="black")
+    ax.plot(snr_vals, R2_CPICs_obs_mean, linestyle="dashed", color="red", label="Stochastic CPIC(O)")
+    # ax.errorbar(snr_vals, R2_CPICs_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std, c="red")
+    ax.plot(snr_vals, R2_CPICs_mean, color="red", label="Stochastic CPIC(L)")
+    # ax.errorbar(snr_vals, R2_CPICs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_std, c="red")
+    ax.plot(snr_vals, R2_CPICs_det_obs_mean, linestyle="dashed", color="blue", label="Deterministic CPIC(O)")
+    # ax.errorbar(snr_vals, R2_CPICs_det_obs_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_det_obs_std, c="blue")
+    ax.plot(snr_vals, R2_CPICs_det_mean, color="blue", label="Deterministic CPIC(L)")
+    # ax.errorbar(snr_vals, R2_CPICs_det_mean, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_det_std, c="blue")
+    ax.plot(snr_vals, R2_CPICs_obs_mean_conv_s, linestyle="dashed", color="green", label="Stochastic CPIC(O, ConvSpatial)")
+    # ax.errorbar(snr_vals, R2_CPICs_obs_mean_conv_s, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std_conv_s, c="green")
+    ax.plot(snr_vals, R2_CPICs_obs_mean_conv_st, linestyle="dashed", color="orange", label="Stochastic CPIC(O, ConvSpatiotemporal)")
+    # ax.errorbar(snr_vals, R2_CPICs_obs_mean_conv_st, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std_conv_st, c="orange")
+    ax.plot(snr_vals, R2_CPICs_obs_mean_conv_t, linestyle="dashed", color="purple", label="Stochastic CPIC(O, ConvTemporal)")
+    # ax.errorbar(snr_vals, R2_CPICs_obs_mean_conv_t, capsize=4, elinewidth=3, alpha=0.7, yerr=R2_CPICs_obs_std_conv_t, c="purple")
+
+    ax.set_xscale('log')
+    ax.set_xlabel('Signal-to-noise ratio (SNR)', fontsize=18)
+    ax.set_ylabel('R\u00b2 regression score', fontsize=18)
+    ax.set_yticks(np.array([0.4, 0.7, 1.0]))
+    ax.tick_params(axis='both', labelsize=18)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=10)
+    plt.subplots_adjust(right=0.58)
+    plt.savefig("fig/R2_lorenz_mean_{}.png".format(num_init), bbox_inches="tight")
     plt.show()
