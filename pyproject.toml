@@ -44,6 +44,9 @@ dca = [
   "DynamicalComponentsAnalysis",
   "numpy>=1.19.5,<2",
 ]
+dev = [
+  "pytest",
+]
 
 [project.urls]
 Homepage = "https://github.com/BouchardLab/CPIC_dev"
