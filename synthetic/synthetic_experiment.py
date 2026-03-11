@@ -241,6 +241,9 @@ if __name__ == "__main__":
         else:
             init_weights = None
 
+        # include SNR in kernel save path so each SNR's kernels are saved in a separate folder
+        kernel_suffix = f"{args.config}/snr_{snr_val}" if args.config else f"snr_{snr_val}"
+
         cpic = CPIC(ydim=ydim, 
                     mi_params=mi_params, 
                     critic_params=critic_params, 
@@ -259,7 +262,7 @@ if __name__ == "__main__":
                               lr=lr, 
                               early_stop=num_early_stop, 
                               writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)),
-                              kernel_save_suffix=args.config,
+                              kernel_save_suffix=kernel_suffix,
                               signature=args.signature)
 
         encoder_type = getattr(cpic.encoder, "encoder_type", None)
