@@ -170,6 +170,22 @@ class CPIC(nn.Module):
         self.device=device
         self.regularization_weight=regularization_weight
 
+        # initialize encoder network
+        encoder_kwargs = dict(self.encoder_params) if self.encoder_params is not None else {}
+        deterministic = encoder_kwargs.pop('deterministic', self.deterministic)
+        encoder_type = encoder_kwargs.pop('encoder_type', None)
+        self.encoder = StructuredEncoder(
+            input_dim=self.xdim,
+            output_dim=self.ydim,
+            hidden_dim=self.hidden_dim,
+            T=self.T,
+            device=self.device,
+            deterministic=deterministic,
+            encoder_type=encoder_type,
+            **encoder_kwargs,
+        )
+        self.encoder.to(self.device)
+
 
     def forward(self, X_past, X_future, debug=False):
         """
@@ -287,22 +303,8 @@ class CPIC(nn.Module):
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
-            
-        # normalise encoder configuration to encoder_type + kwargs for StructuredEncoder
-        encoder_kwargs = dict(self.encoder_params) if self.encoder_params is not None else {}
-        deterministic = encoder_kwargs.pop('deterministic', self.deterministic)
-        encoder_type = encoder_kwargs.pop('encoder_type', None)
-        self.encoder = StructuredEncoder(
-            input_dim=self.xdim,
-            output_dim=self.ydim,
-            hidden_dim=self.hidden_dim,
-            T=self.T,
-            device=self.device,
-            deterministic=deterministic,
-            encoder_type=encoder_type,
-            **encoder_kwargs,
-        )
-        self.encoder.to(self.device)
+
+        # initialize encoder weights
         if init_weights is not None:
             self.encoder._mean.weight = torch.nn.parameter.Parameter(
                 torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(self.device))
@@ -470,3 +472,190 @@ class CPIC(nn.Module):
             loss, I_compress_bound, I_predictive_bound = self(X_past.float(), X_future.float())
         return loss.item(), I_compress_bound.item(), I_predictive_bound.item()
     
+
+class SparseCPIC(CPIC):
+    """
+    Sparse CPIC model.
+    """
+    def __init__(self, gamma=0.1, **kwargs):
+        super().__init__(**kwargs)
+        # sparse regularization threshold
+        self.gamma = gamma
+        
+        # initialize decoder network for sparse regularization, use a linear decoder (no bias) for sparse regularization
+        self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
+        self.decoder.to(self.device)
+
+
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, kernel_save_suffix=None, signature=None):
+        """
+        Fit the CPIC model to the data X.
+
+        Parameters
+        ----------
+        X : PastFutureDataset
+            Input data as a PastFutureDataset object. Contains past and future time-series data.
+        init_weights : np.ndarray, optional
+            Initial weights for the encoder mean layer. The default is None.
+        epochs : int, optional
+            Number of training epochs. The default is 100.
+        batch_size : int, optional
+            Batch size for training. The default is 64.
+        lr : float, optional
+            Learning rate for the optimizer. The default is 1e-4.
+        early_stop : int, optional
+            Early stopping patience. The default is 10.
+        writer : SummaryWriter, optional
+            tensorBoardX SummaryWriter for logging. The default is None.
+        kernel_save_suffix : str, optional
+            Optional suffix for kernel visualization directory. The default is None.
+        signature : str or int, optional
+            Signature/identifier for kernel visualization directory. The default is None.
+        """
+        train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
+
+        if self.xdim is None:
+            self.xdim = X[0][0].shape[-1]
+
+        # initialize encoder weights
+        if init_weights is not None:
+            self.encoder._mean.weight = torch.nn.parameter.Parameter(
+                torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(self.device))
+        self.init_weights = init_weights
+                
+        # initialize decoder weights using random normal distribution (weight shape is (out_features, in_features) = (xdim, ydim))
+        self.decoder.weight = torch.nn.parameter.Parameter(
+            torch.randn(self.xdim, self.ydim).to(self.device))
+
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        best_loss = np.inf
+        no_improve = 0 # counter for early stopping
+        global_step = 0 # for tensorboard logging
+
+        stats = {"mean": np.mean, "std": np.std, "min": np.min, "max": np.max} # for mutual information bounds
+
+        if self.init_weights is not None:
+            do_init = True
+            optimizer_init = torch.optim.Adam(list(self.critic.parameters()), lr=lr)
+        else:
+            do_init = False
+
+        for epoch in tqdm.tqdm(range(epochs)):
+            loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch, decoder_loss_by_epoch = [], [], [], []
+            for X_past_batch, X_future_batch in train_loader:
+                X_past_batch = X_past_batch.to(torch.float).to(self.device)
+                X_future_batch = X_future_batch.to(torch.float).to(self.device)
+
+                loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
+
+                encoded_past_mean, encoded_past_vars = self.encoder(X_past_batch)
+                encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
+                       torch.randn(*encoded_past_mean.size()).to(self.device)
+                # add proximal operator to encoded_past: shrink towards 0 if abs(value) > gamma, else unchanged
+                encoded_past = torch.where(
+                    torch.abs(encoded_past) > self.gamma,
+                    torch.sign(encoded_past) * (torch.abs(encoded_past) - self.gamma),
+                    encoded_past
+                )
+                # stop the gradient of encoded_past
+                encoded_past = encoded_past.detach()
+                decoded_past = self.decoder(encoded_past)
+
+                encoded_future_mean, encoded_future_vars = self.encoder(X_future_batch)
+                encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
+                       torch.randn(*encoded_future_mean.size()).to(self.device)
+                # add proximal operator to encoded_future: shrink towards 0 if abs(value) > gamma, else unchanged
+                encoded_future = torch.where(
+                    torch.abs(encoded_future) > self.gamma,
+                    torch.sign(encoded_future) * (torch.abs(encoded_future) - self.gamma),
+                    encoded_future
+                )
+                # stop the gradient of encoded_future
+                encoded_future = encoded_future.detach()
+                decoded_future = self.decoder(encoded_future) 
+
+                decoder_loss = (torch.mean((decoded_past - X_past_batch) ** 2) + torch.mean((decoded_future - X_future_batch) ** 2)) / 2
+
+                loss = loss + decoder_loss
+
+                loss.backward()
+
+                # Check if gradients are NaN
+                grad_bool = True
+                for name, param in self.named_parameters():
+                    if not torch.isfinite(param.grad).all():
+                        print(epoch, name, torch.isfinite(param.grad).all())
+                        grad_bool = False
+                        break
+                if not grad_bool:
+                    break
+                if do_init and epoch < (epochs / 4):
+                    optimizer_init.step()
+                    optimizer_init.zero_grad()
+                else:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                if writer:
+                    writer.add_scalar("batch/loss", loss.item(), global_step)
+                    writer.add_scalar("batch/I_compress", I_compress_bound.item(), global_step)
+                    writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
+                    writer.add_scalar("batch/decoder_loss", decoder_loss.item(), global_step)
+                    global_step += 1
+
+                loss_by_epoch.append(loss.item())
+                I_compress_bound_by_epoch.append(I_compress_bound.item())
+                I_predictive_bound_by_epoch.append(I_predictive_bound.item())
+                decoder_loss_by_epoch.append(decoder_loss.item())
+            
+            mean_loss = np.mean(loss_by_epoch)
+            mean_I_compress = np.mean(I_compress_bound_by_epoch)
+            mean_I_predictive = np.mean(I_predictive_bound_by_epoch)
+            mean_decoder_loss = np.mean(decoder_loss_by_epoch)
+            print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}, decoder_loss={mean_decoder_loss:.4f}")
+            if writer:
+                writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
+                
+                if len(I_compress_bound_by_epoch) > 0:
+                    for name, fn in stats.items():                    
+                        writer.add_scalar(f"epoch/I_compress/{name}", fn(I_compress_bound_by_epoch), global_step=epoch) 
+                    writer.add_histogram("epoch/I_compress_dist", np.array(I_compress_bound_by_epoch), epoch)
+
+                if len(I_predictive_bound_by_epoch) > 0:
+                    for name, fn in stats.items():                    
+                        writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
+                    writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
+
+                if len(decoder_loss_by_epoch) > 0:
+                    for name, fn in stats.items():                    
+                        writer.add_scalar(f"epoch/decoder_loss/{name}", fn(decoder_loss_by_epoch), global_step=epoch)
+                    writer.add_histogram("epoch/decoder_loss_dist", np.array(decoder_loss_by_epoch), epoch)
+
+            if mean_loss < best_loss:
+                best_loss = mean_loss
+                best_I_compress = mean_I_compress
+                best_I_predictive = mean_I_predictive
+                best_decoder_loss = mean_decoder_loss
+                no_improve = 0
+            else:
+                no_improve += 1
+                if no_improve >= early_stop:
+                    print("Early stopping...")
+                    break
+
+        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or Conv1dTemporalEncoder
+        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv1d_temporal') and not self.encoder.linear_encoder:
+            if signature is not None:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = f"kernel_visualizations/{signature}"
+            else:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = "kernel_visualizations"
+            print(f'Visualizing kernels to {kernel_save_dir}...')
+            visualize_conv_kernels(self, kernel_save_dir)
+
+        return best_loss, best_I_compress, best_I_predictive, best_decoder_loss
