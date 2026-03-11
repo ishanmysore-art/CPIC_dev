@@ -127,7 +127,7 @@ def load_encoder_params(cfg):
     encoder_params = {
         "deterministic": deterministic,
         "linear_encoder": linear_encoder,
-        "nonlinear_encoder_type": encoder_type,
+        "encoder_type": encoder_type,
         "n_layers": n_layers,
         "activation": activation,
         "conv_kernel_size": conv_kernel_size,

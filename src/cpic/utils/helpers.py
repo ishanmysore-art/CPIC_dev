@@ -62,12 +62,12 @@ def _visualize_kernel_layer_1d(layer, layer_idx, save_dir, type='mean'):
     if kernels.max() != 0:
         kernels = np.abs(kernels / kernels.max())
 
-    # Treat each 1D kernel as a small patch: (out_ch, k) -> (out_ch, 1, height, k)
+    # Prepare 1D kernels as small image patches for make_grid:
+    # kernels has shape (out_ch, k) where each row is a 1×k temporal kernel.
     out_ch, k = kernels.shape
-    bar_height = k  # use kernel size so each bar is roughly square
-    # (out_ch, k) -> (out_ch, bar_height, k) by repeating along height
-    patches = np.tile(kernels[:, np.newaxis, :], (1, bar_height, 1))
-    # (out_ch, bar_height, k) -> (out_ch, 1, bar_height, k) for make_grid
+    # (out_ch, k) -> (out_ch, 1, k): add a channel dimension
+    patches = np.tile(kernels[:, np.newaxis, :], (1, 1, 1))
+    # (out_ch, 1, k) -> (out_ch, 1, 1, k): add a height dimension for make_grid (1×k bar per filter)
     patches = torch.from_numpy(patches).unsqueeze(1)
     filter_img = torchvision.utils.make_grid(patches, nrow=8, padding=2)
     filter_img_2d = filter_img[0].numpy()
