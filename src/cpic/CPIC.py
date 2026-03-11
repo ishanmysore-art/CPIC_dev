@@ -519,55 +519,11 @@ class SparseCPIC(CPIC):
         decoder_loss : torch.Tensor
             Decoder loss.
         """    
-        batch_size = X_past.shape[0]
+        L, I_compress_bound, I_predictive_bound = super().forward(X_past, X_future, debug=debug)
 
         encoded_past_mean, encoded_past_vars = self.encoder(X_past)
         encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
-                       torch.randn(*encoded_past_mean.size()).to(self.device)
-        encoded_past_reshaped = encoded_past.reshape(batch_size, -1)
-
-        encoded_future_mean, encoded_future_vars = self.encoder(X_future)
-        encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
-                       torch.randn(*encoded_future_mean.size()).to(self.device)
-        encoded_future_reshaped = encoded_future.reshape(batch_size, -1)
-
-        future_reshaped = X_future.reshape(batch_size, -1)
-
-        if self.deterministic:
-            I_compress_bound = torch.tensor([0]).to(self.device)
-        else:
-            I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], X_past,
-                                                           encoded_past_reshaped, decoder=self.encoder, device=self.device)
-        if self.predictive_space == "latent":
-            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
-                                                             encoded_past_reshaped,
-                                                             encoded_future_reshaped, critic_fn=self.critic,
-                                                             baseline_fn=self.baseline, device=self.device)
-        elif self.predictive_space == "observation":
-            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
-                                                             encoded_past_reshaped,
-                                                             future_reshaped, critic_fn=self.critic,
-                                                             baseline_fn=self.baseline, device=self.device)
-        else:
-            raise ValueError('The predictive space is not specified.')
-
-        if self.beta2 > 0:
-            I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
-                                                 future_reshaped, critic_fn=self.critic_YX, device=self.device)
-            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
-        else:
-            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
-
-        if self.regularization_weight > 0:
-            weight = self.encoder._mean.weight
-            L = L + self.regularization_weight * torch.sum(torch.abs(weight)) / torch.norm(weight)
-            # L = L + self.regularization_weight * torch.norm(weight, p='nuc') / torch.norm(weight)
-            print(torch.sum(torch.abs(weight)) / torch.norm(weight))
-            print(weight)
-        if debug:
-            estimate_mutual_information(self.mi_params['estimator_compress'], X_past, encoded_past_reshaped,
-                                        decoder=self.encoder, device=self.device, debug=debug)
-
+                torch.randn(*encoded_past_mean.size()).to(self.device)
         # add proximal operator to encoded_past: shrink towards 0 if abs(value) > gamma, else unchanged
         encoded_past_proximal = torch.where(
             torch.abs(encoded_past) > self.gamma,
@@ -578,6 +534,10 @@ class SparseCPIC(CPIC):
         encoded_past_proximal = encoded_past_proximal.detach()
         decoded_past = self.decoder(encoded_past_proximal)
 
+
+        encoded_future_mean, encoded_future_vars = self.encoder(X_future)
+        encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
+            torch.randn(*encoded_future_mean.size()).to(self.device)
         # add proximal operator to encoded_future: shrink towards 0 if abs(value) > gamma, else unchanged
         encoded_future = torch.where(
             torch.abs(encoded_future) > self.gamma,
