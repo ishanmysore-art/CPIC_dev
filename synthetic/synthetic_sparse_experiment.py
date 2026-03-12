@@ -111,7 +111,7 @@ def load_encoder_params(cfg):
     encoder_params = {
         "deterministic": deterministic,
         "linear_encoder": linear_encoder,
-        "nonlinear_encoder_type": encoder_type,
+        "encoder_type": encoder_type,
         "n_layers": n_layers,
         "activation": activation,
         "conv_kernel_size": conv_kernel_size,
@@ -161,7 +161,7 @@ linewidth_3d = 0.5
 # uses config_lorenz_stochastic_infonce_exploration.ini arguments
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CPIC experiments.')
-    parser.add_argument('--config', type=str, default="lorenz_stochastic_infonce_obs_exploration")
+    parser.add_argument('--config', type=str, default="lorenz_stochastic_infonce_sparse")
     parser.add_argument('--seed', type=int, default=22, help='seed for the DCA initialization')
     parser.add_argument('--signature', type=int, default=22, help='signature for the CPIC object')
     parser.add_argument('--device', type=str, default=None)

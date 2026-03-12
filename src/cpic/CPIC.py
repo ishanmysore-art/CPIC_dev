@@ -54,10 +54,10 @@ class CPIC(nn.Module):
         Parameters for encoder. A dictionary with keys:
             deterministic : bool
                 Whether to use deterministic encoder. Default is False.
+            encoder_type : str
+                Type of nonlinear encoder. Default is 'mlp'.
             linear_encoder : bool
                 Whether to use linear encoder. Default is True.
-            nonlinear_encoder_type : str
-                Type of nonlinear encoder. One of ['mlp', 'conv']. Default is 'mlp'.
             n_layers : int
                 Number of layers for nonlinear encoder. Default is 1.
             activation : str
@@ -135,15 +135,27 @@ class CPIC(nn.Module):
         self.ydim = ydim
         self.hidden_dim = hidden_dim
         self.T = T
+
+        self.device=device
+
+        # initialize encoder network
         self.encoder_params = encoder_params or {}
-        self.deterministic = self.encoder_params.get('deterministic', False)
-        self.linear_encoder = self.encoder_params.get('linear_encoder', True)
-        self.nonlinear_encoder_type = self.encoder_params.get('nonlinear_encoder_type', 'mlp')
-        self.n_layers = self.encoder_params.get('n_layers', 1)
-        self.activation = self.encoder_params.get('activation', 'relu')
-        self.conv_kernel_size = self.encoder_params.get('conv_kernel_size', 3)
-        self.conv_stride = self.encoder_params.get('conv_stride', 1)
-        self.conv_padding = self.encoder_params.get('conv_padding', 1)
+        self.encoder_kwargs = dict(self.encoder_params) if self.encoder_params is not None else {}
+        self.deterministic = self.encoder_kwargs.pop('deterministic', False)
+        self.encoder_type = self.encoder_kwargs.pop('encoder_type', 'mlp')
+        self.encoder = None
+        if self.xdim is not None: # if xdim is not specified, initialize encoder network in fit method
+            self.encoder = StructuredEncoder(
+                input_dim=self.xdim,
+                output_dim=self.ydim,
+                hidden_dim=self.hidden_dim,
+                T=self.T,
+                device=self.device,
+                deterministic=self.deterministic,
+                encoder_type=self.encoder_type,
+                **self.encoder_kwargs,
+            )
+            self.encoder.to(self.device)
 
         if mi_params is None:
             mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
@@ -167,24 +179,7 @@ class CPIC(nn.Module):
             self.critic_YX = CRITICS[mi_params.get('critic', 'concat')](**critic_params_YX)
             self.critic_YX.to(device)
         self.mi_params = mi_params
-        self.device=device
         self.regularization_weight=regularization_weight
-
-        # initialize encoder network
-        encoder_kwargs = dict(self.encoder_params) if self.encoder_params is not None else {}
-        deterministic = encoder_kwargs.pop('deterministic', self.deterministic)
-        encoder_type = encoder_kwargs.pop('encoder_type', None)
-        self.encoder = StructuredEncoder(
-            input_dim=self.xdim,
-            output_dim=self.ydim,
-            hidden_dim=self.hidden_dim,
-            T=self.T,
-            device=self.device,
-            deterministic=deterministic,
-            encoder_type=encoder_type,
-            **encoder_kwargs,
-        )
-        self.encoder.to(self.device)
 
 
     def forward(self, X_past, X_future, debug=False):
@@ -303,6 +298,17 @@ class CPIC(nn.Module):
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
+            self.encoder = StructuredEncoder(
+                input_dim=self.xdim,
+                output_dim=self.ydim,
+                hidden_dim=self.hidden_dim,
+                T=self.T,
+                device=self.device,
+                deterministic=self.deterministic,
+                encoder_type=self.encoder_type,
+                **self.encoder_kwargs,
+            )
+            self.encoder.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -483,8 +489,70 @@ class SparseCPIC(CPIC):
         self.gamma = gamma
         
         # initialize decoder network for sparse regularization, use a linear decoder (no bias) for sparse regularization
-        self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
-        self.decoder.to(self.device)
+        self.decoder = None
+        if self.xdim is not None: # if xdim is not specified, initialize decoder network in fit method
+            self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
+            self.decoder.to(self.device)
+
+
+    def forward(self, X_past, X_future, debug=False):
+        """
+        Forward pass of the SparseCPIC model.
+
+        Parameters
+        ----------
+        X_past : torch.Tensor
+            Past time-series data tensor.
+        X_future : torch.Tensor
+            Future time-series data tensor.
+        debug : bool, optional
+            Whether to print debug information. The default is False.
+
+        Returns
+        -------
+        L : torch.Tensor
+            CPIC loss.
+        I_compress_bound : torch.Tensor
+            Estimated compression mutual information bound.
+        I_predictive_bound : torch.Tensor
+            Estimated predictive mutual information bound.
+        decoder_loss : torch.Tensor
+            Decoder loss.
+        """    
+        L, I_compress_bound, I_predictive_bound = super().forward(X_past, X_future, debug=debug)
+
+        encoded_past_mean, encoded_past_vars = self.encoder(X_past)
+        encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
+                torch.randn(*encoded_past_mean.size()).to(self.device)
+        # add proximal operator to encoded_past: shrink towards 0 if abs(value) > gamma, else unchanged
+        encoded_past_proximal = torch.where(
+            torch.abs(encoded_past) > self.gamma,
+            torch.sign(encoded_past) * (torch.abs(encoded_past) - self.gamma),
+            encoded_past
+        )
+        # stop the gradient of encoded_past_proximal
+        encoded_past_proximal = encoded_past_proximal.detach()
+        decoded_past = self.decoder(encoded_past_proximal)
+
+
+        encoded_future_mean, encoded_future_vars = self.encoder(X_future)
+        encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
+            torch.randn(*encoded_future_mean.size()).to(self.device)
+        # add proximal operator to encoded_future: shrink towards 0 if abs(value) > gamma, else unchanged
+        encoded_future = torch.where(
+            torch.abs(encoded_future) > self.gamma,
+            torch.sign(encoded_future) * (torch.abs(encoded_future) - self.gamma),
+            encoded_future
+        )
+        # stop the gradient of encoded_future
+        encoded_future = encoded_future.detach()
+        decoded_future = self.decoder(encoded_future) 
+
+        decoder_loss = (torch.mean((decoded_past - X_past) ** 2) + torch.mean((decoded_future - X_future) ** 2)) / 2
+
+        L = L + decoder_loss
+            
+        return L, I_compress_bound, I_predictive_bound, decoder_loss
 
 
     def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, kernel_save_suffix=None, signature=None):
@@ -516,6 +584,20 @@ class SparseCPIC(CPIC):
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
+            self.encoder = StructuredEncoder(
+                input_dim=self.xdim,
+                output_dim=self.ydim,
+                hidden_dim=self.hidden_dim,
+                T=self.T,
+                device=self.device,
+                deterministic=self.deterministic,
+                encoder_type=self.encoder_type,
+                **self.encoder_kwargs,
+            )
+            self.encoder.to(self.device)
+
+            self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
+            self.decoder.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -546,37 +628,7 @@ class SparseCPIC(CPIC):
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
 
-                loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
-
-                encoded_past_mean, encoded_past_vars = self.encoder(X_past_batch)
-                encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
-                       torch.randn(*encoded_past_mean.size()).to(self.device)
-                # add proximal operator to encoded_past: shrink towards 0 if abs(value) > gamma, else unchanged
-                encoded_past = torch.where(
-                    torch.abs(encoded_past) > self.gamma,
-                    torch.sign(encoded_past) * (torch.abs(encoded_past) - self.gamma),
-                    encoded_past
-                )
-                # stop the gradient of encoded_past
-                encoded_past = encoded_past.detach()
-                decoded_past = self.decoder(encoded_past)
-
-                encoded_future_mean, encoded_future_vars = self.encoder(X_future_batch)
-                encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
-                       torch.randn(*encoded_future_mean.size()).to(self.device)
-                # add proximal operator to encoded_future: shrink towards 0 if abs(value) > gamma, else unchanged
-                encoded_future = torch.where(
-                    torch.abs(encoded_future) > self.gamma,
-                    torch.sign(encoded_future) * (torch.abs(encoded_future) - self.gamma),
-                    encoded_future
-                )
-                # stop the gradient of encoded_future
-                encoded_future = encoded_future.detach()
-                decoded_future = self.decoder(encoded_future) 
-
-                decoder_loss = (torch.mean((decoded_past - X_past_batch) ** 2) + torch.mean((decoded_future - X_future_batch) ** 2)) / 2
-
-                loss = loss + decoder_loss
+                loss, I_compress_bound, I_predictive_bound, decoder_loss = self(X_past_batch, X_future_batch)
 
                 loss.backward()
 

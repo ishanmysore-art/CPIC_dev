@@ -1,3 +1,6 @@
+from typing import Any
+
+
 import argparse
 import pickle
 import matplotlib.pyplot as plt
@@ -22,6 +25,10 @@ def collect_data(saved_root, num_init):
     R2_CPICs_opt = list()
     for idx, idx_min in enumerate(np.argmin(loss_CPICs, axis=0)):
         R2_CPICs_opt.append(R2_CPICs[idx_min, idx])
+        
+    mean_R2_per_seed = np.mean(R2_CPICs, axis=1)
+    best_seed_overall = int(np.argmax(mean_R2_per_seed))
+    print(f"{saved_root}: best seed = {best_seed_overall} (mean R^2 = {mean_R2_per_seed[best_seed_overall]:.4f})")
 
     return R2_CPICs_mean, R2_CPICs_std, R2_CPICs_opt
 
@@ -45,13 +52,12 @@ if __name__ == "__main__":
     # R2_DCAs_mean = np.mean(R2_DCAs, axis=0)
     # R2_DCAs_std = np.std(R2_DCAs, axis=0)
 
-
     # collect the CPIC results.
     R2_CPICs_mean, R2_CPICs_std, R2_CPICs_opt = collect_data("res/lorenz_stochastic_infonce_exploration", num_init)
     R2_CPICs_obs_mean, R2_CPICs_obs_std, R2_CPICs_obs_opt = collect_data("res/lorenz_stochastic_infonce_obs_exploration", num_init)
     R2_CPICs_det_mean, R2_CPICs_det_std, R2_CPICs_det_opt = collect_data("res/lorenz_deterministic_infonce_exploration", num_init)
     R2_CPICs_det_obs_mean, R2_CPICs_det_obs_std, R2_CPICs_det_obs_opt = collect_data("res/lorenz_deterministic_infonce_obs_exploration", num_init)
-    
+
     # collect the CPIC conv results
     R2_CPICs_obs_mean_conv_s, R2_CPICs_obs_std_conv_s, R2_CPICs_obs_opt_conv_s = collect_data("res/lorenz_stochastic_infonce_obs_exploration_conv_s", num_init)
     R2_CPICs_obs_mean_conv_st, R2_CPICs_obs_std_conv_st, R2_CPICs_obs_opt_conv_st = collect_data("res/lorenz_stochastic_infonce_obs_exploration_conv_st", num_init)

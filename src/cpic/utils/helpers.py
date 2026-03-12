@@ -54,20 +54,30 @@ def _extract_conv_layers(module):
 def _visualize_kernel_layer_1d(layer, layer_idx, save_dir, type='mean'):
     """
     Visualize kernels for a single Conv1d layer.
-    Weight shape (out_channels, in_channels, kernel_size) -> heatmap (out_ch, kernel_size).
-    """
+    """    
     kernels = layer.weight.detach().clone().cpu()
     # average over in_channels: (out_ch, kernel_size)
     kernels = kernels.mean(dim=1).numpy()
     kernels = kernels - kernels.min()
     if kernels.max() != 0:
         kernels = np.abs(kernels / kernels.max())
+
+    # Prepare 1D kernels as small image patches for make_grid:
+    # kernels has shape (out_ch, k) where each row is a 1×k temporal kernel.
+    out_ch, k = kernels.shape
+    # (out_ch, k) -> (out_ch, 1, k): add a channel dimension
+    patches = np.tile(kernels[:, np.newaxis, :], (1, 1, 1))
+    # (out_ch, 1, k) -> (out_ch, 1, 1, k): add a height dimension for make_grid (1×k bar per filter)
+    patches = torch.from_numpy(patches).unsqueeze(1)
+    filter_img = torchvision.utils.make_grid(patches, nrow=8, padding=2)
+    filter_img_2d = filter_img[0].numpy()
+
     plt.figure()
-    plt.imshow(kernels, cmap='gist_gray', aspect='auto')
+    plt.imshow(filter_img_2d, cmap='gist_gray')
     plt.colorbar()
-    plt.title(f'{type} Layer {layer_idx} (Conv1d) - {kernels.shape[0]} filters')
-    plt.xlabel('kernel tap')
-    plt.ylabel('filter')
+    plt.xticks([])
+    plt.yticks([])
+    plt.title(f'{type} Layer {layer_idx} - {kernels.shape[0]} filters')
     plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
     plt.close()
 
@@ -100,9 +110,9 @@ def _visualize_kernel_layer(layer, layer_idx, save_dir, type='mean'):
     filter_img_2d = filter_img[0, :, :]
     plt.imshow(filter_img_2d, cmap='gist_gray')
     plt.colorbar()
-    
+    plt.xticks([])
+    plt.yticks([])
     plt.title(f'{type} Layer {layer_idx} - {kernels.shape[0]} filters')
-    
     plt.savefig(os.path.join(save_dir, f'{type}_kernel_layer_{layer_idx}.png'))
     plt.close()
 

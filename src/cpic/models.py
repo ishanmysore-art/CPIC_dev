@@ -400,11 +400,9 @@ class StructuredEncoder(nn.Module):
     deterministic : bool, optional
         Whether to use deterministic encoder. Default is False.
     encoder_type : str, optional
-        Type of encoder. Default is None.
+        Type of encoder. Default is 'mlp'.
     linear_encoder : bool, optional
         Whether to use linear encoder. Default is True.
-    nonlinear_encoder_type : str, optional
-        Type of nonlinear encoder. Default is 'mlp'.
     n_layers : int, optional
         Number of layers for nonlinear encoder. Default is 1.
     activation : str, optional
@@ -424,8 +422,6 @@ class StructuredEncoder(nn.Module):
         Type of encoder.
     linear_encoder : bool
         Whether to use linear encoder.
-    nonlinear_encoder_type : str
-        Type of nonlinear encoder.
     n_layers : int
         Number of layers for nonlinear encoder.
     activation : str
@@ -449,9 +445,8 @@ class StructuredEncoder(nn.Module):
             T=4,
             device="cuda:0", 
             deterministic=False,
-            encoder_type=None,
+            encoder_type="mlp",
             linear_encoder=True,
-            nonlinear_encoder_type="mlp",
             n_layers=1,
             activation='relu',
             conv_kernel_size=3,
@@ -461,13 +456,6 @@ class StructuredEncoder(nn.Module):
             ):
         super(StructuredEncoder, self).__init__()
         self.deterministic = deterministic
-
-        if encoder_type is None:
-            # linear vs nonlinear MLP/conv controlled by flags
-            if linear_encoder:
-                encoder_type = "linear"
-            else:
-                encoder_type = nonlinear_encoder_type
 
         # pack encoder-specific kwargs; factories will pick what they need (ADD as we add more encoder types)
         encoder_kwargs = {

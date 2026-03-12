@@ -24,11 +24,11 @@ if __name__ == "__main__":
             os.system('python synthetic_experiment.py --seed {} --config lorenz_deterministic_infonce_obs_exploration --device {}'
                       .format(i, args.device))
         if args.method == "CPIC_conv_s":
-            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_s --device {}'
-                      .format(i, args.device))
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_s --device {} --signature {}'
+                      .format(i, args.device, i))
         if args.method == "CPIC_conv_st":
-            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_st --device {}'
-                      .format(i, args.device))
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_st --device {} --signature {}'
+                      .format(i, args.device, i))
         if args.method == "CPIC_conv_t":
-            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_t --device {}'
-                      .format(i, args.device))
+            os.system('python synthetic_experiment.py --seed {} --config lorenz_stochastic_infonce_obs_exploration_conv_t --device {} --signature {}'
+                      .format(i, args.device, i))
