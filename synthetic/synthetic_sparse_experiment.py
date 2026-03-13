@@ -4,7 +4,7 @@ Run CPIC experiments for synthetic data.
 Usage:
 cd /path/to/CPIC_dev/synthetic
 
-python synthetic_sparse_experiment.py --config lorenz_stochastic_infonce_sparse
+python synthetic_sparse_experiment.py --config lorenz_stochastic_infonce_sparse --seed 22 --signature 22
 """
 
 from cpic import SparseCPIC
