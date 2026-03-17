@@ -1,11 +1,12 @@
-__pycache__
+__pycache__/
 *.hdf5
 *.pkl
 **/tensor_logs
 .idea/*
 .vscode/
-*.egg-info/
-dist/*
+*.egg-info
+build/
+dist/
 *.pyc
 .venv/*
 **/.DS_Store
@@ -15,11 +16,14 @@ dist/*
 **/data
 **/.ipynb_checkpoints/
 .pytest_cache/
+.python_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 *.so
+*.gif
+*.png
 
 # synthetic data
 synthetic/data/

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 
 
 """
@@ -9,7 +10,7 @@ Encoders
 def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None):
     """
     Multi-layer perceptron. 
-    Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
+    Input (batch, T, input_dim) -> output (batch, T, output_dim).
 
     Parameters
     ----------
@@ -45,7 +46,7 @@ def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
 
 class ConvSpatialEncoder(nn.Module):
     """
-    2D convolutional encoder that convolves over features (spatial dimension)
+    2D convolutional encoder that convolves over features (spatial dimension), the spatial data is 1D (e.g. EEG recordings)
     Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
 
     Parameters
@@ -273,6 +274,110 @@ class ConvTemporalEncoder(nn.Module):
         return out
 
 
+class ConvSpatial2DEncoder(nn.Module):
+    """
+    2D convolutional encoder for inputs whose feature axis is a flattened 2D grid.
+
+    Expected high-level flow (for grid splatting representation):
+    - CPIC / StructuredEncoder passes x with shape (batch, 1, G*G, T)
+    - We interpret G*G as a GxG spatial grid at each time step
+    - Apply Conv2d over (G, G) per time step (no temporal conv here)
+    - Pool spatially and map to output_dim per time step
+    - Return (batch, T, output_dim)
+
+    Parameters
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    hidden_dim : int
+        Number of channels in hidden layers & output layer
+    output_dim : int
+        Output feature dimension (ydim)
+    n_layers : int, optional
+        Number of hidden layers
+    activation : str, optional
+        Activation function ('relu' by default)
+    T : int, optional
+        Time window    
+    kernel_size : int, optional
+        Convolutional kernel size (applied over both spatial dimensions)
+    stride : int, optional
+        Convolutional stride
+    padding : int, optional
+        Convolutional padding
+    """
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation='relu', T=None, kernel_size=3, stride=1, padding=1):
+        super().__init__()
+
+        if activation == 'relu':
+            activation_f = nn.ReLU()
+        else:
+            activation_f = nn.ReLU() # add other activation functions?
+
+        # figure out G from input_dim = G*G
+        G = int(np.sqrt(input_dim))
+        if G * G != input_dim:
+            raise ValueError(f"input_dim is not a perfect square: {input_dim}")
+
+        # track spatial size through conv stack
+        def conv_output_dim(input_dim, k, s, p):
+            return (input_dim + 2 * p - k) // s + 1
+        H = G # height = width = G
+
+        conv_layers = []
+
+        # first conv layer: in_channels=1 (grid), out_channels=hidden_dim
+        # use true 2D kernels over spatial grid (G x G), no temporal dimension here
+        conv_layers.append(nn.Conv2d(in_channels=1, out_channels=hidden_dim, kernel_size=(kernel_size, kernel_size), stride=(stride, stride), padding=(padding, padding)))
+        conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+        conv_layers.append(activation_f)
+        H = conv_output_dim(H, kernel_size, stride, padding)
+        
+        for _ in range(n_layers):
+            conv_layers.append(nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=(kernel_size, kernel_size), stride=(stride, stride), padding=(padding, padding)))
+            conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+            conv_layers.append(activation_f)
+            H = conv_output_dim(H, kernel_size, stride, padding)
+        
+        self.conv_seq = nn.Sequential(*conv_layers)
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.flattened_dim = hidden_dim * H * H
+        self.linear = nn.Linear(self.flattened_dim, self.output_dim)
+
+    def forward(self, x):
+        # x: (batch, 1, input_dim, T) where input_dim = G*G and T = window_size
+        B, _, input_dim, T = x.shape
+
+        G = int(np.sqrt(input_dim))
+        if G * G != input_dim:
+            raise ValueError(f"input_dim is not a perfect square: {input_dim}")
+
+        # x: (B, 1, G*G, T) -> (B, G*G, T)
+        x = x.view(B, input_dim, T)
+        # (B, G*G, T) -> (B, T, G*G)
+        x = x.permute(0, 2, 1).contiguous()
+        # (B, T, G*G) -> (B, T, 1, G, G)
+        x = x.view(B, T, 1, G, G)
+        # merge time into batch so Conv2d runs per timestep
+        x = x.view(B * T, 1, G, G) # (B*T, 1, G, G)
+
+        out = self.conv_seq(x) # (B*T, hidden_dim, H', W')
+
+        # flatten spatial dimensions
+        out = out.flatten(start_dim=1) # (B*T, hidden_dim * H' * W')
+
+        # map to output_dim per timestep
+        out = self.linear(out) # (B*T, output_dim)
+
+        # reshape back to (B, T, output_dim)
+        out = out.view(B, T, self.output_dim)
+        if T == 1:
+            out = out.squeeze(1)
+
+        return out
+
+
 class Zeros(nn.Module):
     def __init__(self, device="cuda:0"):
         super(Zeros, self).__init__()
@@ -355,6 +460,26 @@ def _conv_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **
         activation=activation,
     )
 
+
+def _conv_spatial_2d_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 0)
+    activation = kwargs.get("activation", "relu")
+    kernel_size = kwargs.get("conv_kernel_size", 3)
+    stride = kwargs.get("conv_stride", 1)
+    padding = kwargs.get("conv_padding", 1)
+    return ConvSpatial2DEncoder(
+        input_dim,
+        hidden_dim,
+        output_dim,
+        n_layers=n_layers,
+        activation=activation,
+        T=T,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+    )
+
+
 # Registry of encoder factories. Use encoder_type in encoder_params when building CPIC, e.g.:
 #   encoder_params = {"encoder_type": "mlp"}
 #   encoder_params = {"encoder_type": "mlp2"}
@@ -368,6 +493,7 @@ ENCODERS = {
     "conv_spatial": _conv_spatial_encoder_factory,
     "conv_spatiotemporal": _conv_spatiotemporal_encoder_factory,
     "conv_temporal": _conv_temporal_encoder_factory,
+    "conv_spatial_2d": _conv_spatial_2d_encoder_factory,
 }
 
 ENCODER_INPUT_SHAPE = {
@@ -377,6 +503,7 @@ ENCODER_INPUT_SHAPE = {
     "conv_spatial": "conv",
     "conv_spatiotemporal": "conv",
     "conv_temporal": "conv",
+    "conv_spatial_2d": "conv",
 }
 
 
