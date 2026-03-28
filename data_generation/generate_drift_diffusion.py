@@ -1,13 +1,23 @@
 """
-Spatial drift-diffusion generator for ConvSpatial2DEncoder (+ MLP).
+Spatial drift-diffusion generator for conv encoders (+ MLP).
 
 Design:
 - Coherent blob: particles move together on a circular orbit mu(t) = (r cos(omega t), r sin(omega t))
   with per-particle diffusion and observation noise.
 - Random noise: pure 2D random walks.
-- Output: timeseries (t_max, GxG) ready for CPIC (Gaussian splatting grid representation).
+- Output: timeseries (t_max, N*2) ready for CPIC; interleaved particle coordinates
+  [x0,y0,x1,y1,...] after sorting particles by x at t=0 (label-agnostic, geometric order).
 
 Ground truth for evaluation only (never passed to CPIC): (t_max, 2) circular trajectory (cos, sin) for R2 / alignment.
+
+Filter / kernel interpretability (particle representation)
+---------------------------------------------------------
+The feature axis is x-sorted at t=0 and interleaved as [x0,y0,x1,y1,...], so index j maps to a
+known spatial ordering along the x-axis in the plane (analogous to electrodes left-to-right).
+Per-particle importance can be summarized by summing absolute filter weights across output channels
+and visualized as a scatter of particles at their t=0 positions colored by importance.
+For a spatiotemporal kernel with shape (k_feat, k_time), the heatmap along the time axis encodes
+which temporal fragments of the dynamics (e.g. segments of the circular orbit) the filter responds to.
 """
 
 import numpy as np
@@ -82,7 +92,7 @@ def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng):
     return positions
 
 
-def generate_drift_diffusion_2d_positions(
+def generate_drift_diffusion_positions(
     t_max,
     num_blob=30,
     num_noise=50,
@@ -91,8 +101,7 @@ def generate_drift_diffusion_2d_positions(
     sigma_blob=0.7,
     sigma_noise=0.5,
     spatial_bounds=10.0,
-    seed=None,
-    ):
+    seed=None):
     """
     Generate 2D particle positions: coherent blob (circular orbit + diffusion) + random noise.
 
@@ -122,7 +131,7 @@ def generate_drift_diffusion_2d_positions(
 
     Returns
     -------
-    positions : np.ndarray, shape (t_max, N, 2)
+    positions : np.ndarray, shape (t_max, 80, 2) -> (t_max - T, T, 160)
         (x, y) for all N = num_blob + num_noise particles.
     """
     if seed is not None:
@@ -143,69 +152,52 @@ def generate_drift_diffusion_2d_positions(
 
 
 # -----------------------------------------------------------------------------
-# Representation: Spatial grid occupancy with Gaussian splatting (t_max, G*G)
+# Representation: interleaved particle coordinates (t_max, N*2)
 # -----------------------------------------------------------------------------
 
-def _positions_to_grid_timeseries(positions, spatial_bounds=10.0, G=32, sigma_splat=0.5):
+def _positions_to_particle_timeseries(positions, seed_positions=None):
     """
-    Convert continuous particle positions into a z-scored spatio‑temporal grid representation.
+    Convert (t_max, N, 2) particle positions into a standardized (t_max, N*2) timeseries.
 
-    At each timestep, this function:
-    1) Lays down a GxG grid covering [-spatial_bounds, spatial_bounds}]^2 
-       and uses the cell centers as grid coordinates.
-    2) For every particle, evaluates an isotropic 2D Gaussian (width sigma_splat) at every grid cell center 
-       and sums contributions across particles, producing a smooth “density map” over the grid.
-    3) Flattens each GxG map to length G * G and z-scores each grid cell
-       across time (subtract mean over t_max, divide by std; degenerate cells get std = 1).
+    Particles are ordered by increasing x-coordinate at t=0 (purely geometric; no use of blob/noise
+    labels). Flattening is interleaved: after sorting, particle i occupies columns 2*i and
+    2*i+1 as [x_i, y_i]. Each column is standardized independently across time.
 
     Parameters
     ----------
     positions : np.ndarray, shape (t_max, N, 2)
-        Continuous 2D positions (x, y) for N particles over t_max.
-    spatial_bounds : float
-        Half-extent of the spatial domain: the grid spans [-spatial_bounds, spatial_bounds}]^2.
-    G : int
-        Number of grid cells per spatial dimension (total cells = G * G).
-    sigma_splat : float
-        Standard deviation of the Gaussian kernel used to “splat” each particle onto the grid.
-    
+        Particle positions (x, y) over time in original simulation order.
+    seed_positions : np.ndarray of shape (N,) optional
+        x-coordinates at t=0 used to define the sort order (e.g. training-set x at t=0). If None,
+        uses positions[0, :, 0]. Pass the same seed_positions on held-out data to apply the
+        identical column ordering as on the reference run.
+
     Returns
     -------
-    data : np.ndarray, shape (t_max, G*G), dtype float32
-        Z-scored soft occupancy values per grid cell over time; this is the grid
-        representation used as CPIC input.
+    data : np.ndarray, shape (t_max, N*2), dtype float32
+        Standardized interleaved coordinates.
+    particle_order : np.ndarray, shape (N,), dtype int
+        Permutation indices such that sorted particle index i is original particle particle_order[i].
+        Feature columns 2*i:2*i+2 correspond to that particle after sorting.
     """
     t_max, N, _ = positions.shape
+    if seed_positions is None:
+        x0 = positions[0, :, 0] # x-coordinates at t=0
+    else:
+        x0 = np.asarray(seed_positions, dtype=np.float64)
+        if x0.shape != (N,):
+            raise ValueError(f"seed_positions must have shape ({N},), got {x0.shape}")
 
-    # uniform grid spacing so that G cells cover [-spatial_bounds, spatial_bounds]
-    cell_size = (2 * spatial_bounds) / G
+    particle_order = np.argsort(x0)
+    pos_sorted = positions[:, particle_order, :]
+    # C-order reshape: (t_max, N, 2) -> (t_max, N*2) as x0,y0,x1,y1,...
+    flat = pos_sorted.reshape(t_max, N * 2).astype(np.float64)
 
-    # 1D coordinates of grid cell centers along x and y
-    xs = -spatial_bounds + (np.arange(G) + 0.5) * cell_size
-    ys = -spatial_bounds + (np.arange(G) + 0.5) * cell_size
-
-    # broadcast to full GxG grid of (x, y) centers
-    cell_x = np.broadcast_to(xs[np.newaxis, :], (G, G))
-    cell_y = np.broadcast_to(ys[:, np.newaxis], (G, G))
-    cells = np.stack([cell_x, cell_y], axis=-1) # (G, G, 2)
-
-    grid_flat = np.zeros((t_max, G * G), dtype=np.float64)
-    for t in range(t_max):
-        # squared Euclidean distance from each grid cell center to each particle
-        diff = positions[t] - cells[:, :, np.newaxis, :]
-        d2 = (diff ** 2).sum(axis=-1) # (G, G, N)
-
-        # add up Gaussian contributions from all N particles at every grid cell
-        M = np.exp(-d2 / (2 * sigma_splat**2)).sum(axis=-1) # (G, G)
-
-        # store flattened grid for timestep t
-        grid_flat[t] = M.ravel()
-    grid_flat = grid_flat.astype(np.float32)
-
-    mean = grid_flat.mean(axis=0, keepdims=True)
-    std = grid_flat.std(axis=0, keepdims=True)
+    mean = flat.mean(axis=0, keepdims=True)
+    std = flat.std(axis=0, keepdims=True)
     std[std == 0] = 1.0
-    return np.float32((grid_flat - mean) / std)
+    data = np.float32((flat - mean) / std)
+    return data, particle_order
 
 
 # -----------------------------------------------------------------------------
@@ -242,15 +234,14 @@ def generate_drift_diffusion_process_timeseries(
     sigma_blob=0.7,
     sigma_noise=0.5,
     spatial_bounds=10.0,
-    grid_G=32,
-    sigma_splat=0.5,
-    seed=None,
-):
+    seed=None):
     """
     Generate drift-diffusion blob timeseries ready for CPIC.
 
     1) Simulates 2D particles (coherent blob + random noise).
-    2) Applies the chosen representation and z-scores.
+    2) Converts positions to interleaved particle coordinates after x-sort at t=0.
+    3) Standardizes the interleaved particle coordinates.
+    4) Generates ground truth latent (cos, sin) for evaluation.
 
     Parameters
     ----------
@@ -259,40 +250,40 @@ def generate_drift_diffusion_process_timeseries(
     num_blob, num_noise : int
         Particles in coherent blob and random noise.
     orbit_radius, omega : float
-        Blob orbit (r cos(ωt), r sin(ωt)).
+        Blob orbit (r cos(\omega t), r sin(\omega t)).
     sigma_blob, sigma_noise : float
         Blob spread, and noise-particle step std.
     spatial_bounds : float
         Plane [-spatial_bounds, spatial_bounds]^2.
-    grid_G : int
-        Grid side length; total cells = grid_G * grid_G.
-    sigma_splat : float
-        Gaussian splat width.
     seed : int, optional
         Random seed.
 
     Returns
     -------
-    data : np.ndarray, float32
-        (t_max, G*G) soft Gaussian splat, z-scored per cell.
+    data : np.ndarray, float32, shape (t_max, N*2)
+        Standardized interleaved particle coordinates after x-sort at t=0; N = num_blob + num_noise.
     ground_truth_latent : np.ndarray, shape (t_max, 2)
         Circular (cos, sin) trajectory for evaluation.
+    particle_order : np.ndarray, shape (N,)
+        Sort indices (by x at t=0). Columns 2*i:2*i+2 refer to original particle particle_order[i].
+    particle_labels : np.ndarray, shape (N,), int8
+        1 = coherent blob, 0 = noise, in **original** simulation order (before sorting).
+        particle_labels[particle_order] gives labels aligned with the sorted feature columns
+        (pair [2*i, 2*i+1] corresponds to label particle_labels[particle_order[i]]).
     """
-    positions = generate_drift_diffusion_2d_positions(
+    positions = generate_drift_diffusion_positions(
         t_max=t_max,
-        num_blob=num_blob,
-        num_noise=num_noise,
-        orbit_radius=orbit_radius,
-        omega=omega,
-        sigma_blob=sigma_blob,
-        sigma_noise=sigma_noise,
+        num_blob=num_blob, num_noise=num_noise,
+        orbit_radius=orbit_radius, omega=omega,
+        sigma_blob=sigma_blob, sigma_noise=sigma_noise,
         spatial_bounds=spatial_bounds,
-        seed=seed,
-    )
-    data = _positions_to_grid_timeseries(positions, spatial_bounds=spatial_bounds, G=grid_G, sigma_splat=sigma_splat)
+        seed=seed)
+    N = num_blob + num_noise
+    particle_labels = np.zeros(N, dtype=np.int8)
+    particle_labels[:num_blob] = 1
+    data, particle_order = _positions_to_particle_timeseries(positions)
     ground_truth_latent = _generate_ground_truth_latent(t_max, omega=omega, scale=1.0)
-
-    return data, ground_truth_latent
+    return data, ground_truth_latent, particle_order, particle_labels
 
 
 # -----------------------------------------------------------------------------
@@ -333,7 +324,7 @@ def animate_drift_diffusion_process(
     ani : matplotlib.animation.FuncAnimation
         Use plt.show() to display, or ani.save(...) to save elsewhere.
     """
-    positions = generate_drift_diffusion_2d_positions(
+    positions = generate_drift_diffusion_positions(
         t_max=t_max,
         num_blob=num_blob,
         num_noise=num_noise,
