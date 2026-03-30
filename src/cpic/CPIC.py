@@ -503,7 +503,7 @@ class CPIC(nn.Module):
 
     def transform(self, X):
         """
-        Enocode the input data X into the latent space.
+        Encode the input data X into the latent space.
         
         Parameters
         ----------
