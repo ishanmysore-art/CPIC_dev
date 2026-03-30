@@ -264,8 +264,11 @@ if __name__ == "__main__":
                               writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)),
                               kernel_save_suffix=kernel_suffix,
                               signature=args.signature)
-
+        
         encoder_type = getattr(cpic.encoder, "encoder_type", None)
+        if encoder_type in ("conv_spatial", "conv_spatiotemporal", "conv_temporal"):
+            cpic.visualize_kernels(kernel_save_suffix=kernel_suffix, signature=args.signature)
+
         X_true_r2 = X_dynamics
         if encoder_type == "conv_spatiotemporal":
             past_windows = np.stack([X_noisy[t - T:t] for t in range(T, len(X_noisy))], axis=0) # (N-T, T, xdim)

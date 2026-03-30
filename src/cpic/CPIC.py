@@ -157,30 +157,44 @@ class CPIC(nn.Module):
             )
             self.encoder.to(self.device)
 
-        # initialize critic and baseline networks for I_compress, I_predictive
+        # initialize critic and baseline networks for I_predictive bound
         if mi_params is None:
             mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
                          'critic': 'concat', 'baseline': 'constant'}
 
-        # critic network
+        # critic network for I_predictive
         if critic_params is None:
-            if self.predictive_space == "observation":
-                if self.xdim is not None: # and if xdim is not specified, initialize critic network in fit method
-                    critic_params = {"x_dim": T * ydim, "y_dim": T * xdim, "hidden_dim": hidden_dim}
-            elif self.predictive_space == "latent":
+            if self.predictive_space == "latent":
                 critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
-        if self.xdim is not None: # if xdim is not specified, initialize critic network in fit method
+            elif self.predictive_space == "observation" and self.xdim is not None:
+                # and if xdim is not specified, initialize encoder network in fit method
+                critic_params = {"x_dim": T * ydim, "y_dim": T * self.xdim, "hidden_dim": hidden_dim}
+        if critic_params is not None:
             self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
             self.critic.to(device)
+        else:
+            self.critic = None
 
-        # baseline network
+        # baseline network for I_predictive (baseline(y); y is latent or raw future per predictive_space)
         if baseline_params is None:
             baseline_params = {"hidden_dim": hidden_dim}
-        if mi_params.get('baseline', 'constant') == "constant":
-            self.baseline = BASELINES[mi_params.get('baseline', 'constant')]()
+        self.baseline_params = baseline_params
+        baseline_type = mi_params.get('baseline', 'constant')
+        if baseline_type == "constant":
+            self.baseline = BASELINES[baseline_type]()
         else:
-            self.baseline = BASELINES[mi_params.get('baseline', 'constant')](input_dim=self.T * self.ydim, **baseline_params)
-            self.baseline.to(device)
+            baseline_input_dim = None
+            if self.predictive_space == "latent":
+                baseline_input_dim = self.T * self.ydim
+            elif self.predictive_space == "observation" and self.xdim is not None:
+                # and if xdim is not specified, initialize encoder network in fit method
+                baseline_input_dim = self.T * self.xdim
+
+            if baseline_input_dim is not None:
+                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
+                self.baseline.to(device)
+            else:
+                self.baseline = None
 
         # initialize critic network for I_YX
         if self.beta2 > 0:
@@ -278,7 +292,7 @@ class CPIC(nn.Module):
         return encoded_mean
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, kernel_save_suffix=None, signature=None):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None):
         """
         Fit the CPIC model to the data X.
 
@@ -298,16 +312,11 @@ class CPIC(nn.Module):
             Early stopping patience. The default is 10.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
-        kernel_save_suffix : str, optional
-            Optional suffix for kernel visualization directory. The default is None.
-        signature : str or int, optional
-            Signature/identifier for kernel visualization directory. The default is None.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
-
             self.encoder = StructuredEncoder(
                 input_dim=self.xdim,
                 output_dim=self.ydim,
@@ -319,7 +328,23 @@ class CPIC(nn.Module):
                 **self.encoder_kwargs,
             )
             self.encoder.to(self.device)
-            
+
+        # initialize critic and baseline networks for observation predictive space IF given input dim was unknown at initialization
+        if self.critic is None:
+            if self.predictive_space != "observation":
+                raise ValueError("The predictive space should be 'observation' here.")
+            critic_params = {"x_dim": self.T * self.ydim, "y_dim": self.T * self.xdim, "hidden_dim": self.hidden_dim}
+            self.critic = CRITICS[self.mi_params.get('critic', 'concat')](**critic_params)
+            self.critic.to(self.device)
+
+        if self.baseline is None:
+            baseline_type = self.mi_params.get('baseline', 'constant')
+            if baseline_type == "constant":
+                self.baseline = BASELINES[baseline_type]()
+            else:
+                baseline_input_dim = self.T * (self.xdim if self.predictive_space == "observation" else self.ydim)
+                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
+                self.baseline.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -403,22 +428,7 @@ class CPIC(nn.Module):
                 if no_improve >= early_stop:
                     print("Early stopping...")
                     break
-
-        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or ConvTemporalEncoder
-        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv_temporal') and not self.encoder.linear_encoder:
-            if signature is not None:
-                if kernel_save_suffix is not None:
-                    kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
-                else:
-                    kernel_save_dir = f"kernel_visualizations/{signature}"
-            else:
-                if kernel_save_suffix is not None:
-                    kernel_save_dir = f"kernel_visualizations/{kernel_save_suffix}"
-                else:
-                    kernel_save_dir = "kernel_visualizations"
-            print(f'Visualizing kernels to {kernel_save_dir}...')
-            visualize_conv_kernels(self, kernel_save_dir)
-
+                
         return best_loss, best_I_compress, best_I_predictive
 
 
@@ -488,6 +498,34 @@ class CPIC(nn.Module):
         with torch.no_grad():
             loss, I_compress_bound, I_predictive_bound = self(X_past.float(), X_future.float())
         return loss.item(), I_compress_bound.item(), I_predictive_bound.item()
+
+
+    def visualize_kernels(self, kernel_save_suffix=None, signature=None):
+        """
+        Visualize the convolutional kernels of ONLY an ConvSpatialEncoder, ConvSpatiotemporalEncoder, or ConvTemporalEncoder.
+
+        Parameters
+        ----------
+        kernel_save_suffix : str, optional
+            Optional suffix for kernel visualization directory. The default is None.
+        signature : str or int, optional
+            Signature/identifier for kernel visualization directory. The default is None.
+        """
+        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv_temporal') and not self.encoder.linear_encoder:
+            if signature is not None:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = f"kernel_visualizations/{signature}"
+            else:
+                if kernel_save_suffix is not None:
+                    kernel_save_dir = f"kernel_visualizations/{kernel_save_suffix}"
+                else:
+                    kernel_save_dir = "kernel_visualizations"
+            print(f'Visualizing kernels to {kernel_save_dir}...')
+            visualize_conv_kernels(self, kernel_save_dir)
+        else:
+            raise ValueError("The encoder is not a ConvSpatialEncoder, ConvSpatiotemporalEncoder, or Conv1dTemporalEncoder.")
     
 
 class SparseCPIC(CPIC):
@@ -566,7 +604,7 @@ class SparseCPIC(CPIC):
         return L, I_compress_bound, I_predictive_bound, decoder_loss
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, kernel_save_suffix=None, signature=None):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None):
         """
         Fit the CPIC model to the data X.
 
@@ -586,10 +624,6 @@ class SparseCPIC(CPIC):
             Early stopping patience. The default is 10.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
-        kernel_save_suffix : str, optional
-            Optional suffix for kernel visualization directory. The default is None.
-        signature : str or int, optional
-            Signature/identifier for kernel visualization directory. The default is None.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
@@ -609,6 +643,23 @@ class SparseCPIC(CPIC):
 
             self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
             self.decoder.to(self.device)
+
+        # initialize critic and baseline networks for observation predictive space IF given input dim was unknown at initialization
+        if self.critic is None:
+            if self.predictive_space != "observation":
+                raise ValueError("The predictive space should be 'observation' here.")
+            critic_params = {"x_dim": self.T * self.ydim, "y_dim": self.T * self.xdim, "hidden_dim": self.hidden_dim}
+            self.critic = CRITICS[self.mi_params.get('critic', 'concat')](**critic_params)
+            self.critic.to(self.device)
+
+        if self.baseline is None:
+            baseline_type = self.mi_params.get('baseline', 'constant')
+            if baseline_type == "constant":
+                self.baseline = BASELINES[baseline_type]()
+            else:
+                baseline_input_dim = self.T * (self.xdim if self.predictive_space == "observation" else self.ydim)
+                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
+                self.baseline.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -705,20 +756,5 @@ class SparseCPIC(CPIC):
                 if no_improve >= early_stop:
                     print("Early stopping...")
                     break
-
-        # Visualize convolutional kernels if using ConvSpatialEncoder or ConvSpatiotemporalEncoder or Conv1dTemporalEncoder
-        if getattr(self.encoder, "encoder_type", None) in ('conv_spatial', 'conv_spatiotemporal', 'conv1d_temporal') and not self.encoder.linear_encoder:
-            if signature is not None:
-                if kernel_save_suffix is not None:
-                    kernel_save_dir = f"kernel_visualizations/{signature}/{kernel_save_suffix}"
-                else:
-                    kernel_save_dir = f"kernel_visualizations/{signature}"
-            else:
-                if kernel_save_suffix is not None:
-                    kernel_save_dir = f"kernel_visualizations/{kernel_save_suffix}"
-                else:
-                    kernel_save_dir = "kernel_visualizations"
-            print(f'Visualizing kernels to {kernel_save_dir}...')
-            visualize_conv_kernels(self, kernel_save_dir)
 
         return best_loss, best_I_compress, best_I_predictive, best_decoder_loss
