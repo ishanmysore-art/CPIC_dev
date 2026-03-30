@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.19.5",
+  "tensorboard>=2.20.0",
   "scipy",
   "h5py",
   "pandas",

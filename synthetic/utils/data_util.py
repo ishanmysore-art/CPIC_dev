@@ -19,6 +19,25 @@ def compute_R2(X_inf, X_true):
 
 
 def linear_alignment(X_inf, X_true):
+    """
+    Perform linear alignment of inferred data to true data using least-squares regression.
+
+    This function computes the optimal linear transformation (matrix beta) that 
+    best maps the inferred data X_inf to the true data X_true in the least-squares sense.
+    It returns the transformed X_inf aligned to X_true.
+
+    Parameters
+    ----------
+    X_inf : np.ndarray
+        Inferred data. Shape: (n_samples, n_features) or (T, N).
+    X_true : np.ndarray
+        True data to align to. Shape: (n_samples, n_targets) or (T, N).
+
+    Returns
+    -------
+    X_trans : np.ndarray
+        Linearly transformed version of X_inf aligned to X_true.
+    """
     beta = np.linalg.lstsq(X_inf, X_true, rcond=None)[0]
     X_trans = np.dot(X_inf, beta)
     return X_trans

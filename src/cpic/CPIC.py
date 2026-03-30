@@ -1,3 +1,4 @@
+from errno import ECANCELED
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -292,7 +293,69 @@ class CPIC(nn.Module):
         return encoded_mean
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None):
+    def compute_encoded_mean_stats(self, X, batch_size=256, writer=None, step=0):
+        """
+        Compute and store the mean and variance of the encoded past mean and encoded future mean
+        across the dataset. Stats are computed per latent dimension (sample mean and sample variance
+        over samples). Optionally log them to a TensorBoard writer.
+
+        Parameters
+        ----------
+        X : PastFutureDataset
+            Dataset yielding (X_past, X_future) pairs.
+        batch_size : int, optional
+            Batch size for encoding. The default is 256.
+        writer : SummaryWriter, optional
+            TensorBoard SummaryWriter. If provided, histograms and scalar summaries of the stats
+            are logged (encoded_past_mean_stats, encoded_future_mean_stats).
+        step : int, optional
+            Global step for writer. The default is 0.
+
+        Attributes set
+        ---------------
+        encoded_past_mean_stats : dict
+            'mean': np.ndarray (latent_dim,), 'variance': np.ndarray (latent_dim,).
+        encoded_future_mean_stats : dict
+            'mean': np.ndarray (latent_dim,), 'variance': np.ndarray (latent_dim,).
+        """
+        self.eval()
+        past_means, future_means = [], []
+        loader = DataLoader(X, batch_size=batch_size, shuffle=False)
+        with torch.no_grad():
+            for X_past_batch, X_future_batch in loader:
+                X_past_batch = X_past_batch.to(torch.float).to(self.device)
+                X_future_batch = X_future_batch.to(torch.float).to(self.device)
+                enc_past_mean, _ = self.encoder(X_past_batch)
+                enc_future_mean, _ = self.encoder(X_future_batch)
+                batch_size_actual = enc_past_mean.shape[0]
+                # take the first timestamp of time series for the encoded past mean
+                past_means.append(enc_past_mean[:, 0, :].cpu().numpy())
+                # take the first timestamp of time series for the encoded future mean
+                future_means.append(enc_future_mean[:, 0, :].cpu().numpy())
+        self.train()
+        past_means = np.concatenate(past_means, axis=0)
+        future_means = np.concatenate(future_means, axis=0)
+        self.encoded_past_mean_stats = {
+            "mean": np.mean(past_means, axis=0),
+            "variance": np.var(past_means, axis=0),
+        }
+        self.encoded_future_mean_stats = {
+            "mean": np.mean(future_means, axis=0),
+            "variance": np.var(future_means, axis=0),
+        }
+        if writer is not None:
+            writer.add_histogram("encoded_mean_stats/encoded_past_mean/mean_in_latent_dimensions", self.encoded_past_mean_stats["mean"], step)
+            writer.add_histogram("encoded_mean_stats/encoded_past_mean/variance_in_latent_dimensions", self.encoded_past_mean_stats["variance"], step)
+            writer.add_histogram("encoded_mean_stats/encoded_future_mean/mean_in_latent_dimensions", self.encoded_future_mean_stats["mean"], step)
+            writer.add_histogram("encoded_mean_stats/encoded_future_mean/variance_in_latent_dimensions", self.encoded_future_mean_stats["variance"], step)
+            writer.add_scalar("encoded_mean_stats/encoded_past_mean/mean_over_dims", np.mean(self.encoded_past_mean_stats["mean"]), step)
+            writer.add_scalar("encoded_mean_stats/encoded_past_mean/variance_over_dims", np.mean(self.encoded_past_mean_stats["variance"]), step)
+            writer.add_scalar("encoded_mean_stats/encoded_future_mean/mean_over_dims", np.mean(self.encoded_future_mean_stats["mean"]), step)
+            writer.add_scalar("encoded_mean_stats/encoded_future_mean/variance_over_dims", np.mean(self.encoded_future_mean_stats["variance"]), step)
+        return self.encoded_past_mean_stats, self.encoded_future_mean_stats
+
+
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True):
         """
         Fit the CPIC model to the data X.
 
@@ -312,6 +375,9 @@ class CPIC(nn.Module):
             Early stopping patience. The default is 10.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
+        compute_encoded_mean_stats : bool, optional
+            If True, compute and store mean/variance of encoded past and future means after training,
+            and log them to writer if provided. The default is True.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
@@ -417,6 +483,9 @@ class CPIC(nn.Module):
                     for name, fn in stats.items():                    
                         writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
                     writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
+
+                if compute_encoded_mean_stats:
+                    self.compute_encoded_mean_stats(X, batch_size=batch_size, writer=writer, step=epoch)
 
             if mean_loss < best_loss:
                 best_loss = mean_loss
@@ -579,8 +648,9 @@ class SparseCPIC(CPIC):
             torch.sign(encoded_past) * (torch.abs(encoded_past) - self.gamma),
             encoded_past
         )
-        # stop the gradient of encoded_past_proximal
-        encoded_past_proximal = encoded_past_proximal.detach()
+        # Straight-through: forward = proximal, backward = identity
+        encoded_past_proximal = encoded_past_proximal.detach() + (encoded_past - encoded_past.detach())
+
         decoded_past = self.decoder(encoded_past_proximal)
 
 
@@ -604,7 +674,7 @@ class SparseCPIC(CPIC):
         return L, I_compress_bound, I_predictive_bound, decoder_loss
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True):
         """
         Fit the CPIC model to the data X.
 
@@ -624,6 +694,9 @@ class SparseCPIC(CPIC):
             Early stopping patience. The default is 10.
         writer : SummaryWriter, optional
             tensorBoardX SummaryWriter for logging. The default is None.
+        compute_encoded_mean_stats : bool, optional
+            If True, compute and store mean/variance of encoded past and future means after training,
+            and log them to writer if provided. The default is True.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
 
@@ -744,6 +817,9 @@ class SparseCPIC(CPIC):
                     for name, fn in stats.items():                    
                         writer.add_scalar(f"epoch/decoder_loss/{name}", fn(decoder_loss_by_epoch), global_step=epoch)
                     writer.add_histogram("epoch/decoder_loss_dist", np.array(decoder_loss_by_epoch), epoch)
+
+                if compute_encoded_mean_stats:
+                    self.compute_encoded_mean_stats(X, batch_size=batch_size, writer=writer, step=epoch)
 
             if mean_loss < best_loss:
                 best_loss = mean_loss
