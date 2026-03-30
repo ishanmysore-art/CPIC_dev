@@ -144,7 +144,7 @@ class CPIC(nn.Module):
         self.deterministic = self.encoder_kwargs.pop('deterministic', False)
         self.encoder_type = self.encoder_kwargs.pop('encoder_type', 'mlp')
         self.encoder = None
-        if self.xdim is not None: # if xdim is not specified, initialize encoder network in fit method
+        if self.xdim is not None: # and if xdim is not specified, initialize encoder network in fit method
             self.encoder = StructuredEncoder(
                 input_dim=self.xdim,
                 output_dim=self.ydim,
@@ -157,27 +157,36 @@ class CPIC(nn.Module):
             )
             self.encoder.to(self.device)
 
+        # initialize critic and baseline networks for I_compress, I_predictive
         if mi_params is None:
             mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
                          'critic': 'concat', 'baseline': 'constant'}
+
+        # critic network
         if critic_params is None:
-            critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
+            if self.predictive_space == "observation":
+                if self.xdim is not None: # and if xdim is not specified, initialize critic network in fit method
+                    critic_params = {"x_dim": T * ydim, "y_dim": T * xdim, "hidden_dim": hidden_dim}
+            elif self.predictive_space == "latent":
+                critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
+        if self.xdim is not None: # if xdim is not specified, initialize critic network in fit method
+            self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
+            self.critic.to(device)
+
+        # baseline network
         if baseline_params is None:
             baseline_params = {"hidden_dim": hidden_dim}
-
-        # initialize critic and baseline for I_compress, I_predictive
-        self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
-        self.critic.to(device)
-
         if mi_params.get('baseline', 'constant') == "constant":
             self.baseline = BASELINES[mi_params.get('baseline', 'constant')]()
         else:
             self.baseline = BASELINES[mi_params.get('baseline', 'constant')](input_dim=self.T * self.ydim, **baseline_params)
             self.baseline.to(device)
-        # initialize critic for I_YX
+
+        # initialize critic network for I_YX
         if self.beta2 > 0:
             self.critic_YX = CRITICS[mi_params.get('critic', 'concat')](**critic_params_YX)
             self.critic_YX.to(device)
+
         self.mi_params = mi_params
         self.regularization_weight=regularization_weight
 
@@ -298,6 +307,7 @@ class CPIC(nn.Module):
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
+
             self.encoder = StructuredEncoder(
                 input_dim=self.xdim,
                 output_dim=self.ydim,
@@ -309,6 +319,7 @@ class CPIC(nn.Module):
                 **self.encoder_kwargs,
             )
             self.encoder.to(self.device)
+            
 
         # initialize encoder weights
         if init_weights is not None:
