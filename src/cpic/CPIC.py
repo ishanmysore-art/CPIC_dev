@@ -145,7 +145,7 @@ class CPIC(nn.Module):
         self.deterministic = self.encoder_kwargs.pop('deterministic', False)
         self.encoder_type = self.encoder_kwargs.pop('encoder_type', 'mlp')
         self.encoder = None
-        if self.xdim is not None: # and if xdim is not specified, initialize encoder network in fit method
+        if self.xdim is not None: # if xdim is not specified, initialize encoder network in fit method
             self.encoder = StructuredEncoder(
                 input_dim=self.xdim,
                 output_dim=self.ydim,
@@ -167,15 +167,12 @@ class CPIC(nn.Module):
         if critic_params is None:
             if self.predictive_space == "latent":
                 critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
-            elif self.predictive_space == "observation" and self.xdim is not None:
-                # and if xdim is not specified, initialize encoder network in fit method
+            elif self.predictive_space == "observation":
+                assert self.xdim is not None, "xdim must be specified for predictive_space='observation'."
                 critic_params = {"x_dim": T * ydim, "y_dim": T * self.xdim, "hidden_dim": hidden_dim}
-        if critic_params is not None:
-            self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
-            self.critic.to(device)
-        else:
-            self.critic = None
-
+        self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
+        self.critic.to(device)
+   
         # baseline network for I_predictive (baseline(y); y is latent or raw future per predictive_space)
         if baseline_params is None:
             baseline_params = {"hidden_dim": hidden_dim}
@@ -184,18 +181,15 @@ class CPIC(nn.Module):
         if baseline_type == "constant":
             self.baseline = BASELINES[baseline_type]()
         else:
-            baseline_input_dim = None
             if self.predictive_space == "latent":
                 baseline_input_dim = self.T * self.ydim
-            elif self.predictive_space == "observation" and self.xdim is not None:
-                # and if xdim is not specified, initialize encoder network in fit method
+            elif self.predictive_space == "observation":
+                assert self.xdim is not None, "xdim must be specified for predictive_space='observation'."
                 baseline_input_dim = self.T * self.xdim
 
-            if baseline_input_dim is not None:
-                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
-                self.baseline.to(device)
-            else:
-                self.baseline = None
+            self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
+            self.baseline.to(device)
+            
 
         # initialize critic network for I_YX
         if self.beta2 > 0:
@@ -394,23 +388,6 @@ class CPIC(nn.Module):
                 **self.encoder_kwargs,
             )
             self.encoder.to(self.device)
-
-        # initialize critic and baseline networks for observation predictive space IF given input dim was unknown at initialization
-        if self.critic is None:
-            if self.predictive_space != "observation":
-                raise ValueError("The predictive space should be 'observation' here.")
-            critic_params = {"x_dim": self.T * self.ydim, "y_dim": self.T * self.xdim, "hidden_dim": self.hidden_dim}
-            self.critic = CRITICS[self.mi_params.get('critic', 'concat')](**critic_params)
-            self.critic.to(self.device)
-
-        if self.baseline is None:
-            baseline_type = self.mi_params.get('baseline', 'constant')
-            if baseline_type == "constant":
-                self.baseline = BASELINES[baseline_type]()
-            else:
-                baseline_input_dim = self.T * (self.xdim if self.predictive_space == "observation" else self.ydim)
-                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
-                self.baseline.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -716,23 +693,6 @@ class SparseCPIC(CPIC):
 
             self.decoder = nn.Linear(self.ydim, self.xdim, bias=False)
             self.decoder.to(self.device)
-
-        # initialize critic and baseline networks for observation predictive space IF given input dim was unknown at initialization
-        if self.critic is None:
-            if self.predictive_space != "observation":
-                raise ValueError("The predictive space should be 'observation' here.")
-            critic_params = {"x_dim": self.T * self.ydim, "y_dim": self.T * self.xdim, "hidden_dim": self.hidden_dim}
-            self.critic = CRITICS[self.mi_params.get('critic', 'concat')](**critic_params)
-            self.critic.to(self.device)
-
-        if self.baseline is None:
-            baseline_type = self.mi_params.get('baseline', 'constant')
-            if baseline_type == "constant":
-                self.baseline = BASELINES[baseline_type]()
-            else:
-                baseline_input_dim = self.T * (self.xdim if self.predictive_space == "observation" else self.ydim)
-                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
-                self.baseline.to(self.device)
 
         # initialize encoder weights
         if init_weights is not None:
