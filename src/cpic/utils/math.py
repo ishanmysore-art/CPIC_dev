@@ -3,6 +3,21 @@ import numpy as np
 
 
 def KL_between_normals(q_distr, p_distr):
+    '''
+    Compute the KL divergence between two normal distributions.
+
+    Parameters
+    ----------
+    q_distr : tuple
+        Tuple of mean and variance of the first normal distribution.
+    p_distr : tuple
+        Tuple of mean and variance of the second normal distribution.
+
+    Returns
+    -------
+    two_kl * 0.5: torch.Tensor
+        KL divergence between the two normal distributions, divided by 2.
+    '''
     mu_q, sigma_q = q_distr
     mu_p, sigma_p = p_distr
     k = mu_q.size(1)
@@ -18,6 +33,23 @@ def KL_between_normals(q_distr, p_distr):
 
 
 def reduce_logmeanexp_nodiag(x, dim=[0,1], device="cuda:0"):
+    '''
+    Reduce logmeanexp over a batch, excluding the diagonal elements.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor of shape [batch_size, batch_size].
+    dim : list, optional
+        Dimensions to reduce over. The default is [0,1].
+    device : str, optional
+        Device to use. The default is 'cuda:0'.
+
+    Returns
+    -------
+    logsumexp - torch.log(torch.tensor(num_elem).to(device)): torch.Tensor
+        Reduced logmeanexp tensor of shape [batch_size].
+    '''
     batch_size = x.size()[0]
     logsumexp = torch.logsumexp(x - torch.diag(np.inf * torch.ones(batch_size).to(device)), dim=dim)
     if dim == [0,1]:

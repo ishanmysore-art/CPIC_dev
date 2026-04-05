@@ -9,7 +9,7 @@ Encoders
 def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None):
     """
     Multi-layer perceptron. 
-    Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
+    Input (batch, T, input_dim) -> output (batch, T, output_dim).
 
     Parameters
     ----------
@@ -45,7 +45,7 @@ def MLP(input_dim, hidden_dim, output_dim, n_layers=1, activation='relu', T=None
 
 class ConvSpatialEncoder(nn.Module):
     """
-    2D convolutional encoder that convolves over features (spatial dimension)
+    2D convolutional encoder that convolves over features (spatial dimension), the spatial data is 1D (e.g. EEG recordings)
     Input (batch, 1, input_dim, T) -> output (batch, T, output_dim).
 
     Parameters
@@ -127,6 +127,31 @@ class ConvSpatialEncoder(nn.Module):
             out = out.squeeze(1)
             
         return out
+
+    def get_filters(self, layer_idx=0):
+        """
+        Return Conv2d kernel weights for analysis / visualization.
+
+        Parameters
+        ----------
+        layer_idx : int
+            Index among Conv2d layers in self.conv_seq (0 = first convolution).
+
+        Returns
+        -------
+        weight : np.ndarray
+            Shape (out_channels, in_channels, kernel_h, kernel_w) for this encoder.
+            kernel_w is 1 (time), kernel_h is the spatial feature kernel size.
+        meta : dict
+            padding, stride, kernel_size tuples as in the nn.Conv2d module.
+        """
+        conv2ds = [m for m in self.conv_seq if isinstance(m, nn.Conv2d)]
+        if layer_idx < 0 or layer_idx >= len(conv2ds):
+            raise ValueError(f"layer_idx must be in [0, {len(conv2ds) - 1}], got {layer_idx}")
+        layer = conv2ds[layer_idx]
+        w = layer.weight.detach().cpu().numpy()
+        meta = {"padding": layer.padding, "stride": layer.stride, "kernel_size": layer.kernel_size}
+        return w, meta
 
 
 class ConvSpatiotemporalEncoder(nn.Module):
@@ -355,6 +380,7 @@ def _conv_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **
         activation=activation,
     )
 
+
 # Registry of encoder factories. Use encoder_type in encoder_params when building CPIC, e.g.:
 #   encoder_params = {"encoder_type": "mlp"}
 #   encoder_params = {"encoder_type": "mlp2"}
@@ -519,6 +545,14 @@ class StructuredEncoder(nn.Module):
         else:
             x_processed = x
         return self._mean(x_processed)
+
+    def get_filters(self, layer_idx=0):
+        """
+        For Conv-based mean encoders; return first (or indexed) convolutional kernel weights.
+        """
+        if hasattr(self._mean, "get_filters"):
+            return self._mean.get_filters(layer_idx=layer_idx)
+        raise NotImplementedError(f"get_filters is not implemented for encoder type {self.encoder_type!r}")
 
     def reshape_for_conv(self, x):
         # takes in x as (batch, time, features) or (batch, features)

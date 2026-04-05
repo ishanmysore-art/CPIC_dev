@@ -69,9 +69,8 @@ def estimate_mutual_information(estimator, x, y, critic_fn=None, baseline_fn=Non
         Function taking `y` and returning a baseline of shape
         [batch_size] or [batch_size, 1]; used by the 'tuba' estimator.
     decoder : callable, optional
-        Decoder mapping `x` to `(mean, vars)`; when provided, it is used with
-        `decoderscores` for likelihood-based estimators and with 'vub' to form
-        the variational upper bound.
+        Decoder mapping `x` to `(mean, vars)`; when provided, it is used for computing the compression mutual information bound.
+        Used with `decoderscores` for likelihood-based estimators and with 'vub' to form the variational upper bound.
     device : str, optional
         Device on which to perform tensor operations (e.g. 'cuda:0' or 'cpu').
     debug : bool, optional
