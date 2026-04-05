@@ -45,6 +45,9 @@ dca = [
   "DynamicalComponentsAnalysis",
   "numpy>=1.19.5,<2",
 ]
+video = [
+  "opencv-python-headless>=4.8",
+]
 dev = [
   "pytest",
 ]
