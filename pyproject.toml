@@ -13,7 +13,7 @@ authors = [
     { name = "Rui Meng", email = "mengrui6351@gmail.com" }
 ]
 maintainers = [
-    { name = "Phoenix Pham", email = "phoenixpham@berkeley.edu" }
+    { name = "Phoenix Pham", email = "phoenixpham@berkeley.edu" },
     { name = "Kailin Zhuang", email = "kailin.zhuang@berkeley.edu" },
     { name = "Aditya Anantaraman", email = "aditya.anant@berkeley.edu"}
 ]
