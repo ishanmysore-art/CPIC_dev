@@ -83,3 +83,71 @@ Synthetic experiment configurations for CPIC are available in <code>synthetic/co
 
 ## Figures
 Figures for synthetic experiments in the paper are available in <code>synthetic/fig/\*</code>. Figures for real data experiments in the paper are available in <code>analysis/fig/\*</code>.
+
+## Natural movie stimulus data (Dryad)
+
+Source: [Dryad dataset](https://doi.org/10.5061/dryad.4qrfj6qm8) — stimulus and recordings from the Chicago Motion Database, as used in *Stimulus-invariant aspects of the retinal code drive discriminability of natural scenes* (2024). If you use this data in a publication, cite that paper and the Dryad record.
+
+Unpack the archive to a directory on your machine (below we use `/Users/ruimeng/data` as an example). The default `--input` in `scripts/process_avi_to_numpy.py` points at that layout; override `--input` if your path differs.
+
+### Files in the dataset directory
+
+**Movie stimuli (AVI), shown to the retina:**
+
+| File | Content (short) |
+|------|------------------|
+| `MultipleMoviesStim_1_tree.avi` | Tree in wind |
+| `MultipleMoviesStim_2_water.avi` | Water in a small canal |
+| `MultipleMoviesStim_3_grasses.avi` | Tall grasses in wind |
+| `MultipleMoviesStim_4_fish.avi` | Fish in a tank with plants |
+| `MultipleMoviesStim_5_opticflow.avi` | Woods, camera moving through underbrush |
+
+**MATLAB archives (neural data and checkerboard mapping):**
+
+- `movieBinnedSpiking.mat` — binned binary spikes to the movie stimuli (`movnames`, `ncell`, `nmov`, `nreps`, `samplingfreq`, `binned`, …). Responses for movie *i*: `binned(1:nreps(i), :, :, i)`; neuron *j* for movie *i*: `binned(1:nreps(i), :, j, i)`.
+- `binaryCheckerboard.mat` — checkerboard RF mapping (`samplingFreq`, `binaryCheckerboard`, `stimulusFrames`).
+
+### Converting AVI stimuli to NumPy (`scripts/process_avi_to_numpy.py`)
+
+The script decodes an AVI to a frame array (and optional preview image). Its `--help` epilog points at this repository’s `README.md` (resolved from `scripts/process_avi_to_numpy.py`, not from your shell’s current directory).
+
+Install the optional video dependency:
+
+```bash
+uv sync --extra video
+```
+
+Basic run (uses the default `--input` if that file exists):
+
+```bash
+uv run python scripts/process_avi_to_numpy.py
+```
+
+Explicit paths:
+
+```bash
+uv run python scripts/process_avi_to_numpy.py \
+  --input /Users/ruimeng/data/MultipleMoviesStim_4_fish.avi
+```
+
+### Outputs
+
+- **Default:** writes `<video_stem>.npz` next to the video (unless `--output` is set).
+- **`npz` format (default):** `frames` (uint8 `(T, H, W, 3)`, RGB), `fps` (`float32` scalar), `shape` (int64). Load with `numpy.load(..., allow_pickle=False)`.
+- **`npy` format:** `--format npy` saves only the frame array; FPS is not stored.
+- **Preview PNG:** default `<output_stem>_preview.png`; `--no-preview`, `--show`, `--preview PATH`, `--grid N`.
+- **Subsampling:** `--max-frames K`, `--stride N`.
+
+Full CLI: `uv run python scripts/process_avi_to_numpy.py --help`.
+
+### Loading a saved `.npz` in Python
+
+```python
+import numpy as np
+
+data = np.load("MultipleMoviesStim_1_tree.npz", allow_pickle=False)
+frames = data["frames"]  # (T, H, W, 3), uint8, RGB
+fps = float(data["fps"].item())
+```
+
+Use the path where you wrote the file if it is not the current working directory.
