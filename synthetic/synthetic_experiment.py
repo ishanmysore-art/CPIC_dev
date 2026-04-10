@@ -261,9 +261,7 @@ if __name__ == "__main__":
                               batch_size=batch_size, 
                               lr=lr, 
                               early_stop=num_early_stop, 
-                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)),
-                              kernel_save_suffix=kernel_suffix,
-                              signature=args.signature)
+                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
         
         encoder_type = getattr(cpic.encoder, "encoder_type", None)
         if encoder_type in ("conv_spatial", "conv_spatiotemporal", "conv_temporal"):

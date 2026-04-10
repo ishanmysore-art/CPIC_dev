@@ -248,11 +248,12 @@ if __name__ == "__main__":
                               batch_size=batch_size, 
                               lr=lr, 
                               early_stop=num_early_stop, 
-                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)),
-                              kernel_save_suffix=args.config,
-                              signature=args.signature)
+                              writer=SummaryWriter(log_dir="tensor_logs/{}".format(signature)))
 
         encoder_type = getattr(sparse_cpic.encoder, "encoder_type", None)
+        if encoder_type in ("conv_spatial", "conv_spatiotemporal", "conv_temporal"):
+            sparse_cpic.visualize_kernels(kernel_save_suffix=args.config, signature=args.signature)
+            
         X_true_r2 = X_dynamics
         if encoder_type == "conv_spatiotemporal":
             past_windows = np.stack([X_noisy[t - T:t] for t in range(T, len(X_noisy))], axis=0) # (N-T, T, xdim)
