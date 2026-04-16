@@ -27,3 +27,6 @@ htmlcov/
 
 # synthetic data
 synthetic/data/
+
+# video experiment results
+experiments/video_experiment/res/
