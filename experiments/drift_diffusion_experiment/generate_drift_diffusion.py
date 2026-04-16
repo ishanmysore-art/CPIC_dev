@@ -415,7 +415,7 @@ def plot_verification_3d(positions, num_blob, num_noise, path=None):
     ax.set_ylabel("y")
     ax.set_zlabel("t")
     ax.legend()
-    plt.tight_layout()
+    fig.subplots_adjust(left=0, right=0.86, bottom=0.07, top=0.95)
 
     if path is not None:
         plt.savefig(path, dpi=150)
