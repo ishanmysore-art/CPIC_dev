@@ -374,6 +374,16 @@ class CPIC(nn.Module):
             and log them to writer if provided. The default is True.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
+        infonce_upper_keys = [
+            k for k in ("estimator_compress", "estimator_predictive")
+            if self.mi_params.get(k) == "infonce_upper"
+        ]
+        if infonce_upper_keys and batch_size < 2:
+            raise ValueError(
+                "batch_size must be >= 2 when using infonce_upper "
+                f"({', '.join(infonce_upper_keys)}); got batch_size={batch_size}. "
+                "InfoNCE upper bound needs at least one negative sample per batch."
+            )
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
@@ -397,6 +407,8 @@ class CPIC(nn.Module):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_loss = np.inf
+        best_I_compress = np.nan
+        best_I_predictive = np.nan
         no_improve = 0 # counter for early stopping
         global_step = 0 # for tensorboard logging
 
@@ -475,6 +487,11 @@ class CPIC(nn.Module):
                     print("Early stopping...")
                     break
                 
+        if not np.isfinite(best_loss):
+            raise RuntimeError(
+                "Training did not produce a finite epoch loss. This usually indicates non-finite "
+                "values in forward/backward (NaN/Inf), so no valid checkpoint could be selected."
+            )
         return best_loss, best_I_compress, best_I_predictive
 
 
@@ -676,6 +693,16 @@ class SparseCPIC(CPIC):
             and log them to writer if provided. The default is True.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
+        infonce_upper_keys = [
+            k for k in ("estimator_compress", "estimator_predictive")
+            if self.mi_params.get(k) == "infonce_upper"
+        ]
+        if infonce_upper_keys and batch_size < 2:
+            raise ValueError(
+                "batch_size must be >= 2 when using infonce_upper "
+                f"({', '.join(infonce_upper_keys)}); got batch_size={batch_size}. "
+                "InfoNCE upper bound needs at least one negative sample per batch."
+            )
 
         if self.xdim is None:
             self.xdim = X[0][0].shape[-1]
@@ -706,6 +733,9 @@ class SparseCPIC(CPIC):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_loss = np.inf
+        best_I_compress = np.nan
+        best_I_predictive = np.nan
+        best_decoder_loss = np.nan
         no_improve = 0 # counter for early stopping
         global_step = 0 # for tensorboard logging
 
@@ -793,4 +823,9 @@ class SparseCPIC(CPIC):
                     print("Early stopping...")
                     break
 
+        if not np.isfinite(best_loss):
+            raise RuntimeError(
+                "Training did not produce a finite epoch loss. This usually indicates non-finite "
+                "values in forward/backward (NaN/Inf), so no valid checkpoint could be selected."
+            )
         return best_loss, best_I_compress, best_I_predictive, best_decoder_loss
