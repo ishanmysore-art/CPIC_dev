@@ -39,32 +39,29 @@ pip install "cpic[dca]"
 ```
 (Quotes are required in zsh so `[dca]` is not interpreted as a glob.) This installs DynamicalComponentsAnalysis and pins NumPy<2 for compatibility. See https://dynamicalcomponentsanalysis.readthedocs.io/en/latest/index.html.
 
-## Code
+## Repository Structure
 
-### Main Code
-1. Main code:
-   1. CPIC code: <code>src/cpic/CPIC.py</code>
-   2. Encoders, Critics, Baselines: <code>src/cpic/models.py</code>
-   3. Mutual information estimation: <code>src/cpic/mi.py</code>
-   4. utility code: <code>src/cpic/utils/</code>
+### Core Package
+- CPIC implementation: <code>src/cpic/CPIC.py</code>
+- Encoders, critics, and baselines: <code>src/cpic/models.py</code>
+- Mutual information estimation: <code>src/cpic/mi.py</code>
+- Utility modules: <code>src/cpic/utils/</code>
 
-### Synthetic Experiments
-
-1. Lorenz experiment code: <code>synthetic/synthetic_*.py</code>
-   1. Synthetic data generation using <code>synthetic_generator.py</code>.
-   2. CPIC model on synthetic data using <code>synthetic_experiment.py</code>.
-   3. Other models on synthetic data using <code>synthetic_competitors.py</code>.
-   4. Per/Post analysis includes <code>synthetic_visualization.py</code> and <code>synthetic_summarization.py</code>.
-2. Synthetic experiments to understand the Prediction information in CPIC setting:
-   1. Synthetic data generation with <code>synthetic/data_generator.py</code>.
-   2. PI analysis using <code>synthetic/PI_analysis.py</code>.
-
-
-### Real Data Experiments
-1. Real data experiments code: <code>analysis/real_data_*.py</code>
-   1. Real data experiments with CPIC for four datasets including M1, HC, Temp, MS using <code>real_data_experiment_standard.py</code>, <code>real_data_experiment_standard_beta.py</code>. Note that beta refers to varying weight option.
-   2. Real data experiments with other models using <code>real_data_competitors.py</code>.
-   3. Real data experiments post analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>.
+### Experiments
+- Lorenz synthetic experiment: <code>experiments/synthetic_lorenz_experiment/</code>
+  - Data generation: <code>synthetic_generator.py</code>, <code>data_generator.py</code>
+  - CPIC training/evaluation: <code>synthetic_experiment.py</code>, <code>synthetic_sparse_experiment.py</code>
+  - Competitor baselines: <code>synthetic_competitors.py</code>
+  - Post-analysis and plotting: <code>synthetic_visualization.py</code>, <code>synthetic_summarization.py</code>, <code>PI_analysis.py</code>, <code>PI_plot.py</code>
+- Real-data experiments: <code>experiments/real_data_experiments/</code>
+  - CPIC experiments (M1, HC, Temp, MS): <code>real_data_experiment_standard.py</code>, <code>real_data_experiment_standard_beta.py</code>
+  - Competitor baselines: <code>real_data_competitors.py</code>
+  - Summaries/post-analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>
+- Drift diffusion experiment: <code>experiments/drift_diffusion_experiment/</code>
+  - Notebook workflow: <code>drift_diffusion.ipynb</code>
+  - Data generation script: <code>generate_drift_diffusion.py</code>
+- Video experiment: <code>experiments/video_experiment/</code>
+  - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
 
 ## Encoder types
 CPIC supports multiple encoder architectures via <code>encoder_params["encoder_type"]</code>. All encoders map input (T x D) to output (T x M). Unless specified otherwise, <code>deterministic</code> defaults to <code>False</code>. Example configurations:
@@ -79,10 +76,16 @@ CPIC supports multiple encoder architectures via <code>encoder_params["encoder_t
 Pass <code>encoder_params</code> when constructing CPIC, and when calling <code>fit()</code> the encoder is built from the registry.
 
 ## Configuration
-Synthetic experiment configurations for CPIC are available in <code>synthetic/config/\*</code>. Real data experiment configurations for CPIC are available in <code>analysis/config/\*</code>.
+Experiment configurations are grouped under:
+- <code>experiments/synthetic_lorenz_experiment/config/</code>
+- <code>experiments/real_data_experiments/config/</code>
+- <code>experiments/video_experiment/config/</code>
+- <code>experiments/drift_diffusion_experiment/config/</code>
 
 ## Figures
-Figures for synthetic experiments in the paper are available in <code>synthetic/fig/\*</code>. Figures for real data experiments in the paper are available in <code>analysis/fig/\*</code>.
+Figures and generated outputs are stored inside each experiment folder, e.g.:
+- <code>experiments/synthetic_lorenz_experiment/fig/</code>
+- <code>experiments/real_data_experiments/fig/</code>
 
 ## Natural movie stimulus data (Dryad)
 
