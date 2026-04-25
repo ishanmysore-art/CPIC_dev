@@ -20,6 +20,8 @@ maintainers = [
 license = { file = "LICENSE.txt" }
 dependencies = [
   "numpy>=1.19.5",
+  # TensorBoard imports pkg_resources; setuptools 82+ dropped it (pin until TB updates).
+  "setuptools>=65,<82",
   "tensorboard>=2.20.0",
   "scipy",
   "h5py",
