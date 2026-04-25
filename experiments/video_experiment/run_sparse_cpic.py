@@ -223,6 +223,7 @@ if __name__ == "__main__":
     num_early_stop = cfg.getint(tr, "num_early_stop")
     do_dca_init = cfg.getboolean(tr, "do_dca_init")
     decoder_loss_warmup = cfg.getboolean(tr, "decoder_loss_warmup") if cfg.has_option(tr, "decoder_loss_warmup") else False
+    decoder_loss_warmup_epochs = cfg.getint(tr, "decoder_loss_warmup_epochs") if cfg.has_option(tr, "decoder_loss_warmup_epochs") else None
     lr = cfg.getfloat(tr, "lr")
     device = "cpu" if not torch.cuda.is_available() else (args.device or cfg.get(tr, "device"))
     print(f"Device: {device}")
@@ -280,6 +281,7 @@ if __name__ == "__main__":
         early_stop=num_early_stop,
         writer=SummaryWriter(log_dir=log_dir),
         decoder_loss_warmup=decoder_loss_warmup,
+        decoder_loss_warmup_epochs=decoder_loss_warmup_epochs,
     )
     ckpt_path = os.path.join(saved_root, f"sparse_cpic_checkpoint_sig{args.signature}_seed{args.seed}.pt")
     torch.save(

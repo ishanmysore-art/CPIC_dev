@@ -679,6 +679,7 @@ class SparseCPIC(CPIC):
         writer=None,
         compute_encoded_mean_stats=True,
         decoder_loss_warmup=False,
+        decoder_loss_warmup_epochs=None,
     ):
         """
         Fit the CPIC model to the data X.
@@ -705,6 +706,9 @@ class SparseCPIC(CPIC):
         decoder_loss_warmup : bool, optional
             If True, linearly increase decoder loss weight from 0 to 1 across epochs.
             If False, use decoder loss weight of 1 for all epochs. The default is False.
+        decoder_loss_warmup_epochs : int or None, optional
+            Number of warmup epochs before decoder loss weight reaches 1.0.
+            If None, defaults to ``epochs`` (full-run warmup).
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
         infonce_upper_keys = [
@@ -763,10 +767,19 @@ class SparseCPIC(CPIC):
 
         for epoch in tqdm.tqdm(range(epochs)):
             if decoder_loss_warmup:
-                if epochs <= 1:
+                if decoder_loss_warmup_epochs is None:
+                    warmup_epochs = max(epochs, 1)
+                else:
+                    warmup_epochs = int(decoder_loss_warmup_epochs)
+                    if warmup_epochs < 0:
+                        raise ValueError(
+                            f"decoder_loss_warmup_epochs must be >= 0, got {decoder_loss_warmup_epochs}."
+                        )
+                warmup_epochs_minus_one = max(warmup_epochs - 1, 0)
+                if warmup_epochs_minus_one == 0:
                     self.decoder_loss_lambda = 1.0
                 else:
-                    self.decoder_loss_lambda = epoch / (epochs - 1)
+                    self.decoder_loss_lambda = min(epoch / warmup_epochs_minus_one, 1.0)
             else:
                 self.decoder_loss_lambda = 1.0
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch, decoder_loss_by_epoch = [], [], [], []
