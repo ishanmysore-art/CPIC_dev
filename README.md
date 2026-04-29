@@ -60,6 +60,8 @@ pip install "cpic[dca]"
 - Drift diffusion experiment: <code>experiments/drift_diffusion_experiment/</code>
   - Notebook workflow: <code>drift_diffusion.ipynb</code>
   - Data generation script: <code>generate_drift_diffusion.py</code>
+  - Config-driven batch encoder sweep: <code>run_drift_diffusion_experiment.py</code>
+  - Re-plot saved CSV results: <code>plot_drift_diffusion_results.py</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
 
