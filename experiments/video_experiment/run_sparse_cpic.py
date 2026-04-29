@@ -6,8 +6,7 @@ HDF5 inputs were removed; use ``synthetic/synthetic_sparse_experiment.py`` for t
 
 Usage::
 
-    python experiments/video_experiment/run_sparse_cpic.py \\
-        --config experiments/video_experiment/config/config_video_sparse_cpic.ini
+    python experiments/video_experiment/run_sparse_cpic.py --config experiments/video_experiment/config/config_video_sparse_cpic.ini
 """
 
 from __future__ import annotations
@@ -25,14 +24,13 @@ import torch.nn.functional as F
 from tensorboardX import SummaryWriter
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SYNTHETIC_ROOT = _REPO_ROOT / "synthetic"
-if str(_SYNTHETIC_ROOT) not in sys.path:
-    sys.path.insert(0, str(_SYNTHETIC_ROOT))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from cpic import SparseCPIC
 from cpic.utils.data import PastFutureDataset
 from cpic.utils.helpers import DCA_init
-from utils.data_util import compute_R2, linear_alignment
+from experiments.synthetic_lorenz_experiment.utils.data_util import compute_R2, linear_alignment
 
 _EXPERIMENT_ROOT = Path(__file__).resolve().parent
 _CONFIG_DIR = _EXPERIMENT_ROOT / "config"
@@ -224,6 +222,8 @@ if __name__ == "__main__":
     num_epochs = cfg.getint(tr, "num_epochs")
     num_early_stop = cfg.getint(tr, "num_early_stop")
     do_dca_init = cfg.getboolean(tr, "do_dca_init")
+    decoder_loss_warmup = cfg.getboolean(tr, "decoder_loss_warmup") if cfg.has_option(tr, "decoder_loss_warmup") else False
+    decoder_loss_warmup_epochs = cfg.getint(tr, "decoder_loss_warmup_epochs") if cfg.has_option(tr, "decoder_loss_warmup_epochs") else None
     lr = cfg.getfloat(tr, "lr")
     device = "cpu" if not torch.cuda.is_available() else (args.device or cfg.get(tr, "device"))
     print(f"Device: {device}")
@@ -280,22 +280,34 @@ if __name__ == "__main__":
         lr=lr,
         early_stop=num_early_stop,
         writer=SummaryWriter(log_dir=log_dir),
+        decoder_loss_warmup=decoder_loss_warmup,
+        decoder_loss_warmup_epochs=decoder_loss_warmup_epochs,
     )
+    ckpt_path = os.path.join(saved_root, f"sparse_cpic_checkpoint_sig{args.signature}_seed{args.seed}.pt")
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "config_path": str(_resolve_config_arg(args.config)),
+            "signature": args.signature,
+            "seed": args.seed,
+            "xdim": xdim,
+            "ydim": ydim,
+            "T": T,
+            "encoder_params": enc,
+            "sparse_params": p,
+        },
+        ckpt_path,
+    )
+    print(f"Saved checkpoint: {ckpt_path}")
 
     et = getattr(model.encoder, "encoder_type", None)
     if et in ("conv_spatial", "conv_spatiotemporal", "conv_temporal"):
         model.visualize_kernels(kernel_save_suffix="video_sparse", signature=args.signature)
 
-    if et == "conv_spatiotemporal":
-        past = np.stack([X_noisy[t - T : t] for t in range(T, len(X_noisy))], axis=0)
-        past_t = torch.from_numpy(past).float().to(device)
-        centers = [t - 1 for t in range(T, len(X_noisy))]
-        y_obs = X_noisy[centers]
-        enc_out = model.encode(past_t)
-        encoded_repr = enc_out[:, -1, :]
-    else:
-        encoded_repr = model.encode(torch.from_numpy(X_noisy).float().to(device))
-        y_obs = X_noisy
+    encoded_repr = model.encode(torch.from_numpy(X_noisy).float().to(device))
+    # Export the sparse latent code (post-proximal soft-thresholding), consistent with SparseCPIC training.
+    encoded_repr = torch.sign(encoded_repr) * torch.clamp(torch.abs(encoded_repr) - model.gamma, min=0.0)
+    y_obs = X_noisy
 
     aligned = linear_alignment(encoded_repr.detach().cpu().numpy(), y_obs)
     r2 = compute_R2(aligned, y_obs)

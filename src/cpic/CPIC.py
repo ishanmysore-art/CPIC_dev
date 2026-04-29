@@ -599,6 +599,7 @@ class SparseCPIC(CPIC):
         super().__init__(**kwargs)
         # sparse regularization threshold
         self.gamma = gamma
+        self.decoder_loss_lambda = 1.0
         
         # initialize decoder network for sparse regularization, use a linear decoder (no bias) for sparse regularization
         self.decoder = None
@@ -607,7 +608,7 @@ class SparseCPIC(CPIC):
             self.decoder.to(self.device)
 
 
-    def forward(self, X_past, X_future, debug=False):
+    def forward(self, X_past, X_future, debug=False, decoder_loss_lambda=None):
         """
         Forward pass of the SparseCPIC model.
 
@@ -619,6 +620,8 @@ class SparseCPIC(CPIC):
             Future time-series data tensor.
         debug : bool, optional
             Whether to print debug information. The default is False.
+        decoder_loss_lambda : float, optional
+            Weight for decoder loss term. If None, uses self.decoder_loss_lambda.
 
         Returns
         -------
@@ -636,11 +639,9 @@ class SparseCPIC(CPIC):
         encoded_past_mean, encoded_past_vars = self.encoder(X_past)
         encoded_past = encoded_past_mean + torch.sqrt(encoded_past_vars) * \
                 torch.randn(*encoded_past_mean.size()).to(self.device)
-        # add proximal operator to encoded_past: shrink towards 0 if abs(value) > gamma, else unchanged
-        encoded_past_proximal = torch.where(
-            torch.abs(encoded_past) > self.gamma,
-            torch.sign(encoded_past) * (torch.abs(encoded_past) - self.gamma),
-            encoded_past
+        # L1 proximal operator (soft-thresholding): sign(x) * max(|x| - gamma, 0)
+        encoded_past_proximal = torch.sign(encoded_past) * torch.clamp(
+            torch.abs(encoded_past) - self.gamma, min=0.0
         )
         # Straight-through: forward = proximal, backward = identity
         encoded_past_proximal = encoded_past_proximal.detach() + (encoded_past - encoded_past.detach())
@@ -651,24 +652,35 @@ class SparseCPIC(CPIC):
         encoded_future_mean, encoded_future_vars = self.encoder(X_future)
         encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
             torch.randn(*encoded_future_mean.size()).to(self.device)
-        # add proximal operator to encoded_future: shrink towards 0 if abs(value) > gamma, else unchanged
-        encoded_future = torch.where(
-            torch.abs(encoded_future) > self.gamma,
-            torch.sign(encoded_future) * (torch.abs(encoded_future) - self.gamma),
-            encoded_future
+        # L1 proximal operator (soft-thresholding): sign(x) * max(|x| - gamma, 0)
+        encoded_future_proximal = torch.sign(encoded_future) * torch.clamp(
+            torch.abs(encoded_future) - self.gamma, min=0.0
         )
-        # stop the gradient of encoded_future
-        encoded_future = encoded_future.detach()
-        decoded_future = self.decoder(encoded_future) 
+        # Straight-through: forward = proximal, backward = identity
+        encoded_future_proximal = encoded_future_proximal.detach() + (encoded_future - encoded_future.detach())
+        decoded_future = self.decoder(encoded_future_proximal) 
 
         decoder_loss = (torch.mean((decoded_past - X_past) ** 2) + torch.mean((decoded_future - X_future) ** 2)) / 2
-
-        L = L + decoder_loss
+        if decoder_loss_lambda is None:
+            decoder_loss_lambda = self.decoder_loss_lambda
+        L = L + decoder_loss_lambda * decoder_loss
             
         return L, I_compress_bound, I_predictive_bound, decoder_loss
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True):
+    def fit(
+        self,
+        X,
+        init_weights=None,
+        epochs=100,
+        batch_size=64,
+        lr=1e-4,
+        early_stop=10,
+        writer=None,
+        compute_encoded_mean_stats=True,
+        decoder_loss_warmup=False,
+        decoder_loss_warmup_epochs=None,
+    ):
         """
         Fit the CPIC model to the data X.
 
@@ -691,6 +703,12 @@ class SparseCPIC(CPIC):
         compute_encoded_mean_stats : bool, optional
             If True, compute and store mean/variance of encoded past and future means after training,
             and log them to writer if provided. The default is True.
+        decoder_loss_warmup : bool, optional
+            If True, linearly increase decoder loss weight from 0 to 1 across epochs.
+            If False, use decoder loss weight of 1 for all epochs. The default is False.
+        decoder_loss_warmup_epochs : int or None, optional
+            Number of warmup epochs before decoder loss weight reaches 1.0.
+            If None, defaults to ``epochs`` (full-run warmup).
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
         infonce_upper_keys = [
@@ -748,12 +766,32 @@ class SparseCPIC(CPIC):
             do_init = False
 
         for epoch in tqdm.tqdm(range(epochs)):
+            if decoder_loss_warmup:
+                if decoder_loss_warmup_epochs is None:
+                    warmup_epochs = max(epochs, 1)
+                else:
+                    warmup_epochs = int(decoder_loss_warmup_epochs)
+                    if warmup_epochs < 0:
+                        raise ValueError(
+                            f"decoder_loss_warmup_epochs must be >= 0, got {decoder_loss_warmup_epochs}."
+                        )
+                warmup_epochs_minus_one = max(warmup_epochs - 1, 0)
+                if warmup_epochs_minus_one == 0:
+                    self.decoder_loss_lambda = 1.0
+                else:
+                    self.decoder_loss_lambda = min(epoch / warmup_epochs_minus_one, 1.0)
+            else:
+                self.decoder_loss_lambda = 1.0
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch, decoder_loss_by_epoch = [], [], [], []
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
 
-                loss, I_compress_bound, I_predictive_bound, decoder_loss = self(X_past_batch, X_future_batch)
+                loss, I_compress_bound, I_predictive_bound, decoder_loss = self(
+                    X_past_batch,
+                    X_future_batch,
+                    decoder_loss_lambda=self.decoder_loss_lambda,
+                )
 
                 loss.backward()
 
@@ -778,6 +816,7 @@ class SparseCPIC(CPIC):
                     writer.add_scalar("batch/I_compress", I_compress_bound.item(), global_step)
                     writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
                     writer.add_scalar("batch/decoder_loss", decoder_loss.item(), global_step)
+                    writer.add_scalar("batch/decoder_loss_lambda", self.decoder_loss_lambda, global_step)
                     global_step += 1
 
                 loss_by_epoch.append(loss.item())
@@ -792,6 +831,7 @@ class SparseCPIC(CPIC):
             print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}, decoder_loss={mean_decoder_loss:.4f}")
             if writer:
                 writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
+                writer.add_scalar("epoch/decoder_loss_lambda", self.decoder_loss_lambda, global_step=epoch)
                 
                 if len(I_compress_bound_by_epoch) > 0:
                     for name, fn in stats.items():                    

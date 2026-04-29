@@ -154,3 +154,52 @@ fps = float(data["fps"].item())
 ```
 
 Use the path where you wrote the file if it is not the current working directory.
+
+### Training sparse CPIC on video (`experiments/video_experiment`)
+
+Point `[User]` `video_path` in `experiments/video_experiment/config/config_video_sparse_cpic.ini` at your `.npz` (or `.npy`) frames, and adjust `saved_root`, `device`, and hyperparameters as needed.
+
+From `experiments/video_experiment/`:
+
+```bash
+cd experiments/video_experiment
+python run_sparse_cpic.py --config config/config_video_sparse_cpic.ini
+```
+
+If you use `uv` from the repo root without activating a venv, the same invocation is:
+
+```bash
+cd experiments/video_experiment
+uv run python run_sparse_cpic.py --config config/config_video_sparse_cpic.ini
+```
+
+From the repository root (equivalent):
+
+```bash
+uv run python experiments/video_experiment/run_sparse_cpic.py \
+  --config experiments/video_experiment/config/config_video_sparse_cpic.ini
+```
+
+Optional CLI flags include `--seed`, `--signature`, and `--device` (see the script’s `--help`). The default `--signature` is `22`; it selects the run subfolder under `tensor_logs` (below).
+
+### Visualizing `tensor_logs` (TensorBoard)
+
+Training uses [TensorBoardX](https://github.com/lanpa/tensorboardX) and writes event files under:
+
+`<saved_root>/tensor_logs/<signature>/`
+
+where `saved_root` comes from the config `[User]` section and `signature` from `--signature` (default `22`). With the example `saved_root = res/video_sparse_cpic`, that path usually resolves to the repository root (see `run_sparse_cpic.py` if you also keep a copy under `experiments/video_experiment/res/`).
+
+Install is already covered by the main dependencies (`tensorboard` and `tensorboardX` in `pyproject.toml`). From the repository root, point TensorBoard at the `tensor_logs` parent so you can compare multiple signatures in one UI:
+
+```bash
+uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs
+```
+
+Then open the URL TensorBoard prints (by default `http://localhost:6006/`). To view a single run only:
+
+```bash
+uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs/22
+```
+
+Replace `res/video_sparse_cpic` with your `saved_root` if you changed it in the INI.
