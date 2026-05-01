@@ -159,9 +159,17 @@ class CPIC(nn.Module):
             self.encoder.to(self.device)
 
         # initialize critic and baseline networks for I_predictive bound
+        default_mi_params = {
+            'estimator_compress': 'infonce_lower',
+            'estimator_predictive': 'infonce_lower',
+            'critic': 'concat',
+            'baseline': 'constant',
+        }
         if mi_params is None:
-            mi_params = {'estimator_compress': 'infonce_lower', 'estimator_predictive': 'infonce_lower',
-                         'critic': 'concat', 'baseline': 'constant'}
+            mi_params = default_mi_params
+        else:
+            # Merge partial user-specified MI params with defaults to avoid missing-key failures.
+            mi_params = {**default_mi_params, **mi_params}
 
         # critic network for I_predictive
         if critic_params is None:
@@ -349,7 +357,7 @@ class CPIC(nn.Module):
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True):
         """
         Fit the CPIC model to the data X.
 
@@ -420,7 +428,7 @@ class CPIC(nn.Module):
         else:
             do_init = False
 
-        for epoch in tqdm.tqdm(range(epochs)):
+        for epoch in tqdm.tqdm(range(epochs), disable=not verbose):
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch = [], [], []
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
@@ -433,6 +441,8 @@ class CPIC(nn.Module):
                 # Check if gradients are NaN
                 grad_bool = True
                 for name, param in self.named_parameters():
+                    if param.grad is None:
+                        continue
                     if not torch.isfinite(param.grad).all():
                         print(epoch, name, torch.isfinite(param.grad).all())
                         grad_bool = False
@@ -798,6 +808,8 @@ class SparseCPIC(CPIC):
                 # Check if gradients are NaN
                 grad_bool = True
                 for name, param in self.named_parameters():
+                    if param.grad is None:
+                        continue
                     if not torch.isfinite(param.grad).all():
                         print(epoch, name, torch.isfinite(param.grad).all())
                         grad_bool = False
