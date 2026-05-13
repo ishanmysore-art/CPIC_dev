@@ -126,7 +126,7 @@ def plot_preview(frames: np.ndarray, preview_path: Path | None, show: bool, grid
 
 
 def main() -> None:
-    default_input = Path("/Users/ruimeng/data/MultipleMoviesStim_1_tree.avi")
+    default_input = _REPO_ROOT / "data" / "dryad_chicago_natural_movies" / "MultipleMoviesStim_1_tree.avi"
 
     p = argparse.ArgumentParser(
         description=__doc__,

@@ -62,6 +62,7 @@ pip install "cpic[dca]"
   - Data generation script: <code>generate_drift_diffusion.py</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
+  - Dryad Chicago Motion download helper: <code>download_dryad_dataset.py</code> (see README, “Natural movie stimulus data”)
 
 ## Encoder types
 CPIC supports multiple encoder architectures via <code>encoder_params["encoder_type"]</code>. All encoders map input (T x D) to output (T x M). Unless specified otherwise, <code>deterministic</code> defaults to <code>False</code>. Example configurations:
@@ -91,7 +92,34 @@ Figures and generated outputs are stored inside each experiment folder, e.g.:
 
 Source: [Dryad dataset](https://doi.org/10.5061/dryad.4qrfj6qm8) — stimulus and recordings from the Chicago Motion Database, as used in *Stimulus-invariant aspects of the retinal code drive discriminability of natural scenes* (2024). If you use this data in a publication, cite that paper and the Dryad record.
 
-Unpack the archive to a directory on your machine (below we use `/Users/ruimeng/data` as an example). The default `--input` in `scripts/process_avi_to_numpy.py` points at that layout; override `--input` if your path differs.
+### Downloading from Dryad (`experiments/video_experiment/download_dryad_dataset.py`)
+
+This script uses Dryad’s HTTP API to download the published files (AVIs, MATLAB archives, and Dryad’s dataset `README.md`) into `data/dryad_chicago_natural_movies/` at the repository root by default. The `data/` tree is gitignored.
+
+Dryad’s file endpoints require OAuth **client credentials** (not anonymous downloads). After you create a Dryad account with ORCID and add an API application under *My account*, set:
+
+```bash
+export DRYAD_CLIENT_ID="..."
+export DRYAD_CLIENT_SECRET="..."
+```
+
+See [Dryad API accounts](https://github.com/datadryad/dryad-app/blob/main/documentation/apis/api_accounts.md). The script’s module docstring summarizes the same steps.
+
+List remote files without credentials or downloading:
+
+```bash
+uv run python experiments/video_experiment/download_dryad_dataset.py --dry-run
+```
+
+Download all files (requires the environment variables above):
+
+```bash
+uv run python experiments/video_experiment/download_dryad_dataset.py
+```
+
+Use `--output-dir PATH` for a different destination, or `uv run python experiments/video_experiment/download_dryad_dataset.py --help` for flags such as `--force` and `--domain` / `DRYAD_OAUTH_DOMAIN`.
+
+If you prefer not to use the script, unpack a manually obtained copy to a directory on your machine. The default `--input` in `scripts/process_avi_to_numpy.py` is `data/dryad_chicago_natural_movies/MultipleMoviesStim_1_tree.avi` under this repository’s root (the same layout as `download_dryad_dataset.py`); override `--input` if your AVI lives elsewhere.
 
 ### Files in the dataset directory
 
@@ -130,7 +158,7 @@ Explicit paths:
 
 ```bash
 uv run python scripts/process_avi_to_numpy.py \
-  --input /Users/ruimeng/data/MultipleMoviesStim_4_fish.avi
+  --input data/dryad_chicago_natural_movies/MultipleMoviesStim_4_fish.avi
 ```
 
 ### Outputs
