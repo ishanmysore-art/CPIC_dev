@@ -62,6 +62,7 @@ pip install "cpic[dca]"
   - Data generation script: <code>generate_drift_diffusion.py</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
+  - Offline plots from saved checkpoints and pickles: <code>visualize_sparse_cpic_outputs.py</code> (see README, “Visualizing sparse CPIC outputs”)
   - Dryad Chicago Motion download helper: <code>download_dryad_dataset.py</code> (see README, “Natural movie stimulus data”)
 
 ## Encoder types
@@ -209,6 +210,30 @@ uv run python experiments/video_experiment/run_sparse_cpic.py \
 ```
 
 Optional CLI flags include `--seed`, `--signature`, and `--device` (see the script’s `--help`). The default `--signature` is `22`; it selects the run subfolder under `tensor_logs` (below).
+
+### Visualizing sparse CPIC outputs (`experiments/video_experiment/visualize_sparse_cpic_outputs.py`)
+
+After a run, this script reads the saved artifacts under `saved_root` and writes PNG figures (and a reconstructed preview GIF when frame shape matches the model) into:
+
+`<saved_root>/visualizations_sig<signature>_seed<seed>/`
+
+It expects:
+
+- `encoded_representations_seed<seed>.pkl`
+- `sparse_cpic_checkpoint_sig<signature>_seed<seed>.pt` (loads `decoder.weight`)
+- `inferred_trials_seed<seed>.pkl` (reconstructed trial used for frame samples and GIF)
+
+Typical outputs include encoded-representation heatmaps and PC trajectory plots, decoder weight matrix and column norms (plus per-latent RGB basis tiles when dimensions match `H×W×3`), and reconstructed frame samples plus `reconstructed_video.gif` when GIF writing succeeds.
+
+From the repository root (example matches default `saved_root` and matching `seed` / `signature`):
+
+```bash
+uv run python experiments/video_experiment/visualize_sparse_cpic_outputs.py \
+  --saved-root res/video_sparse_cpic \
+  --seed 22 --signature 22
+```
+
+Optional: `--config PATH` (defaults to `experiments/video_experiment/config/config_video_sparse_cpic.ini`) or `--frame-shape H W`. Requires a working Matplotlib install (use `uv run` from the project environment). See the script’s `--help` for full flags.
 
 ### Visualizing `tensor_logs` (TensorBoard)
 
