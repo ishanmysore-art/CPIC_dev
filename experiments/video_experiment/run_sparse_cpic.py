@@ -15,6 +15,7 @@ import argparse
 import os
 import pickle
 import sys
+from datetime import datetime
 from configparser import ConfigParser
 from pathlib import Path
 
@@ -189,7 +190,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Sparse CPIC on video frames.")
     ap.add_argument("--config", type=str, default=str(_CONFIG_DIR / "config_video_sparse_cpic.ini"))
     ap.add_argument("--seed", type=int, default=22)
-    ap.add_argument("--signature", type=int, default=22)
+    ap.add_argument(
+        "--signature",
+        type=int,
+        default=int(datetime.now().strftime("%Y%m%d%H%M%S")),
+        help="Run id for tensor_logs and checkpoints (default: local wall time as YYYYMMDDHHMMSS).",
+    )
     ap.add_argument("--device", type=str, default=None)
     args = ap.parse_args()
 

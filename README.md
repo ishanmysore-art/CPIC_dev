@@ -62,6 +62,9 @@ pip install "cpic[dca]"
   - Data generation script: <code>generate_drift_diffusion.py</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
+  - Train then visualize with one matching <code>--seed</code> / <code>--signature</code>: <code>run_sparse_cpic_train_and_visualize.py</code> (see README, “Train and visualize in one step”)
+  - Offline plots from saved checkpoints and pickles: <code>visualize_sparse_cpic_outputs.py</code> (see README, “Visualizing sparse CPIC outputs”)
+  - Dryad Chicago Motion download helper: <code>download_dryad_dataset.py</code> (see README, “Natural movie stimulus data”)
 
 ## Encoder types
 CPIC supports multiple encoder architectures via <code>encoder_params["encoder_type"]</code>. All encoders map input (T x D) to output (T x M). Unless specified otherwise, <code>deterministic</code> defaults to <code>False</code>. Example configurations:
@@ -91,7 +94,34 @@ Figures and generated outputs are stored inside each experiment folder, e.g.:
 
 Source: [Dryad dataset](https://doi.org/10.5061/dryad.4qrfj6qm8) — stimulus and recordings from the Chicago Motion Database, as used in *Stimulus-invariant aspects of the retinal code drive discriminability of natural scenes* (2024). If you use this data in a publication, cite that paper and the Dryad record.
 
-Unpack the archive to a directory on your machine (below we use `/Users/ruimeng/data` as an example). The default `--input` in `scripts/process_avi_to_numpy.py` points at that layout; override `--input` if your path differs.
+### Downloading from Dryad (`experiments/video_experiment/download_dryad_dataset.py`)
+
+This script uses Dryad’s HTTP API to download the published files (AVIs, MATLAB archives, and Dryad’s dataset `README.md`) into `data/dryad_chicago_natural_movies/` at the repository root by default. The `data/` tree is gitignored.
+
+Dryad’s file endpoints require OAuth **client credentials** (not anonymous downloads). After you create a Dryad account with ORCID and add an API application under *My account*, set:
+
+```bash
+export DRYAD_CLIENT_ID="..."
+export DRYAD_CLIENT_SECRET="..."
+```
+
+See [Dryad API accounts](https://github.com/datadryad/dryad-app/blob/main/documentation/apis/api_accounts.md). The script’s module docstring summarizes the same steps.
+
+List remote files without credentials or downloading:
+
+```bash
+uv run python experiments/video_experiment/download_dryad_dataset.py --dry-run
+```
+
+Download all files (requires the environment variables above):
+
+```bash
+uv run python experiments/video_experiment/download_dryad_dataset.py
+```
+
+Use `--output-dir PATH` for a different destination, or `uv run python experiments/video_experiment/download_dryad_dataset.py --help` for flags such as `--force` and `--domain` / `DRYAD_OAUTH_DOMAIN`.
+
+If you prefer not to use the script, unpack a manually obtained copy to a directory on your machine. The default `--input` in `scripts/process_avi_to_numpy.py` is `data/dryad_chicago_natural_movies/MultipleMoviesStim_1_tree.avi` under this repository’s root (the same layout as `download_dryad_dataset.py`); override `--input` if your AVI lives elsewhere.
 
 ### Files in the dataset directory
 
@@ -130,7 +160,7 @@ Explicit paths:
 
 ```bash
 uv run python scripts/process_avi_to_numpy.py \
-  --input /Users/ruimeng/data/MultipleMoviesStim_4_fish.avi
+  --input data/dryad_chicago_natural_movies/MultipleMoviesStim_4_fish.avi
 ```
 
 ### Outputs
@@ -180,7 +210,53 @@ uv run python experiments/video_experiment/run_sparse_cpic.py \
   --config experiments/video_experiment/config/config_video_sparse_cpic.ini
 ```
 
-Optional CLI flags include `--seed`, `--signature`, and `--device` (see the script’s `--help`). The default `--signature` is `22`; it selects the run subfolder under `tensor_logs` (below).
+Optional CLI flags include `--seed`, `--signature`, and `--device` (see the script’s `--help`). Defaults: `--seed` is `22`; `--signature` is the local wall-clock time as an integer `YYYYMMDDHHMMSS`, and names the run subfolder under `tensor_logs` and the checkpoint filename (below).
+
+### Train and visualize in one step (`run_sparse_cpic_train_and_visualize.py`)
+
+This wrapper runs `run_sparse_cpic.py` and then `visualize_sparse_cpic_outputs.py` with the **same** `--seed` and `--signature`, so visualization paths line up with the artifacts training just wrote. If you omit `--signature`, a single timestamp is chosen at startup and passed to both steps (same behavior as relying on each script’s default).
+
+From the repository root:
+
+```bash
+uv run python experiments/video_experiment/run_sparse_cpic_train_and_visualize.py
+```
+
+Explicit run id and seed:
+
+```bash
+uv run python experiments/video_experiment/run_sparse_cpic_train_and_visualize.py \
+  --config experiments/video_experiment/config/config_video_sparse_cpic.ini \
+  --seed 42 \
+  --signature 20260513120000
+```
+
+Optional: `--device` (training only), `--frame-shape H W` (visualization only), `--saved-root` (visualization only; default is `User.saved_root` from the config and should match where training wrote). See the script’s `--help`.
+
+### Visualizing sparse CPIC outputs (`experiments/video_experiment/visualize_sparse_cpic_outputs.py`)
+
+After a run, this script reads the saved artifacts under `saved_root` and writes PNG figures (and a reconstructed preview GIF when frame shape matches the model) into:
+
+`<saved_root>/visualizations_sig<signature>_seed<seed>/`
+
+It expects:
+
+- `encoded_representations_seed<seed>.pkl`
+- `sparse_cpic_checkpoint_sig<signature>_seed<seed>.pt` (loads `decoder.weight`)
+- `inferred_trials_seed<seed>.pkl` (reconstructed trial used for frame samples and GIF)
+
+Typical outputs include encoded-representation heatmaps and PC trajectory plots, decoder weight matrix and column norms (plus per-latent RGB basis tiles when dimensions match `H×W×3`), and reconstructed frame samples plus `reconstructed_video.gif` when GIF writing succeeds.
+
+From the repository root (use the **same** `--seed` and `--signature` you used for training; `saved_root` must match `[User]` `saved_root` in the config unless you moved files):
+
+```bash
+uv run python experiments/video_experiment/visualize_sparse_cpic_outputs.py \
+  --saved-root res/video_sparse_cpic \
+  --seed 22 \
+  --signature 20260513120000
+```
+
+Optional: `--config PATH` (defaults to `experiments/video_experiment/config/config_video_sparse_cpic.ini`) or `--frame-shape H W`. Requires a working Matplotlib install (use `uv run` from the project environment). See the script’s `--help` for full flags.
 
 ### Visualizing `tensor_logs` (TensorBoard)
 
@@ -188,7 +264,7 @@ Training uses [TensorBoardX](https://github.com/lanpa/tensorboardX) and writes e
 
 `<saved_root>/tensor_logs/<signature>/`
 
-where `saved_root` comes from the config `[User]` section and `signature` from `--signature` (default `22`). With the example `saved_root = res/video_sparse_cpic`, that path usually resolves to the repository root (see `run_sparse_cpic.py` if you also keep a copy under `experiments/video_experiment/res/`).
+where `saved_root` comes from the config `[User]` section and `signature` from `--signature` (default: `YYYYMMDDHHMMSS` wall time when you start training). With the example `saved_root = res/video_sparse_cpic`, that path usually resolves to the repository root (see `run_sparse_cpic.py` if you also keep a copy under `experiments/video_experiment/res/`).
 
 Install is already covered by the main dependencies (`tensorboard` and `tensorboardX` in `pyproject.toml`). From the repository root, point TensorBoard at the `tensor_logs` parent so you can compare multiple signatures in one UI:
 
@@ -196,10 +272,10 @@ Install is already covered by the main dependencies (`tensorboard` and `tensorbo
 uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs
 ```
 
-Then open the URL TensorBoard prints (by default `http://localhost:6006/`). To view a single run only:
+Then open the URL TensorBoard prints (by default `http://localhost:6006/`). To view a single run only (replace the folder name with your run’s `signature`):
 
 ```bash
-uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs/22
+uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs/20260513120000
 ```
 
 Replace `res/video_sparse_cpic` with your `saved_root` if you changed it in the INI.
