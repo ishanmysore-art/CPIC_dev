@@ -12,6 +12,8 @@ dist/
 **/.DS_Store
 **/fig
 **/res
+**/res_v*/
+**/logs/
 **/kernel_visualizations
 **/data
 **/.ipynb_checkpoints/
