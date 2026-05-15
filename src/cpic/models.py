@@ -591,9 +591,11 @@ class FeatureMaskMLPEncoder(nn.Module):
         """
         Return a feature mask sampled from Bernoulli(sigmoid(logits))
         using a straight-through estimator so gradients flow through the underlying probabilities.
+
+        Originally a sigmoid-only mask (deterministic soft gate), change to a Bernoulli-sampled mask (stochastic binary gate).
         """
         probs = torch.sigmoid(self.mask_logits)
-        
+
         # Hard binary sample
         hard = torch.bernoulli(probs)
         # Straight-through estimator: in forward use hard, in backward use probs.
