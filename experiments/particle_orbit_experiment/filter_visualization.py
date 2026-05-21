@@ -44,7 +44,7 @@ def plot_filter_heatmap_panels(
     """
     Plot filter magnitude heatmaps in panel chunks.
 
-    This mirrors the notebook visualization style used in drift_diffusion.ipynb.
+    This mirrors the notebook visualization style used in particle_orbit.ipynb.
     """
     c_out, k_h = w_mag.shape
     chunks = []

@@ -274,7 +274,7 @@ def plot_from_csv(
     ax.axhline(0.0, color="black", linewidth=0.6, linestyle="--")
     ax.tick_params(axis="both", labelsize=12)
     ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
-    ax.set_title(title or f"Drift-diffusion: {metric} vs noise particles", fontsize=14)
+    ax.set_title(title or f"Particle orbit: {metric} vs noise particles", fontsize=14)
 
     if include_mask_panel and ax2 is not None:
         if "mask_active_frac" in df.columns:
@@ -394,9 +394,9 @@ def plot_from_csv(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Replot drift-diffusion results from CSV.")
-    parser.add_argument("--csv", type=Path, default="experiments/drift_diffusion_experiment/res/drift_diffusion_probe_runs.csv", help="Path to drift_diffusion_probe_runs.csv")
-    parser.add_argument("--out", type=Path, default="experiments/drift_diffusion_experiment/res/R2_vs_num_noise_particles.png", help="Output image path (e.g., .png)")
+    parser = argparse.ArgumentParser(description="Replot particle-orbit results from CSV.")
+    parser.add_argument("--csv", type=Path, default="experiments/particle_orbit_experiment/res/particle_orbit_probe_runs.csv", help="Path to particle_orbit_probe_runs.csv")
+    parser.add_argument("--out", type=Path, default="experiments/particle_orbit_experiment/res/R2_vs_num_noise_particles.png", help="Output image path (e.g., .png)")
     parser.add_argument(
         "--metric",
         type=str,

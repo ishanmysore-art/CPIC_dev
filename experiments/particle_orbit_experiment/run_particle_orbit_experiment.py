@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Batch drift-diffusion particle experiment across encoder types and noise levels,
+Batch particle-orbit experiment across encoder types and noise levels,
 configured via INI files (similar workflow to synthetic/synthetic_experiment.py).
 
 Example
 -------
-python run_drift_diffusion_experiment.py --config drift_diffusion_cpic_conv
+python run_particle_orbit_experiment.py --config particle_orbit_cpic_conv
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from sklearn.metrics import r2_score
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC_PATH = ROOT / "src"
-DATA_GEN_PATH = ROOT / "experiments" / "drift_diffusion_experiment"
+DATA_GEN_PATH = ROOT / "experiments" / "particle_orbit_experiment"
 for folder in (SRC_PATH, DATA_GEN_PATH):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
@@ -43,11 +43,11 @@ from filter_visualization import (
     compute_tangential_arrows,
     compute_avg_density_grid,
 )
-from generate_drift_diffusion import generate_drift_diffusion_process_timeseries # type: ignore[reportMissingImports]
+from generate_particle_orbit import generate_particle_orbit_process_timeseries # type: ignore[reportMissingImports]
 
 
 config_file_dict = {
-    "drift_diffusion_cpic_conv": str(Path(__file__).resolve().parent / "config" / "config_drift_diffusion_cpic_conv.ini"),
+    "particle_orbit_cpic_conv": str(Path(__file__).resolve().parent / "config" / "config_particle_orbit_cpic_conv.ini"),
 }
 
 
@@ -454,7 +454,7 @@ def run_condition(
     torch.manual_seed(seed)
 
     (data, gt_latent, particle_order, particle_labels,
-     standardization_mean, standardization_std, positions) = generate_drift_diffusion_process_timeseries(
+     standardization_mean, standardization_std, positions) = generate_particle_orbit_process_timeseries(
         t_max=t_max,
         num_blob=num_blob,
         num_noise=num_noise,
@@ -697,8 +697,8 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Batch drift-diffusion encoder sweep using config files.")
-    parser.add_argument("--config", type=str, default="drift_diffusion_cpic_conv")
+    parser = argparse.ArgumentParser(description="Batch particle-orbit encoder sweep using config files.")
+    parser.add_argument("--config", type=str, default="particle_orbit_cpic_conv")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--signature", type=str, default=None)
     args = parser.parse_args()

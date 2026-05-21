@@ -1,5 +1,5 @@
 """
-Spatial drift-diffusion generator for conv encoders (+ MLP).
+Spatial particle-orbit generator for conv encoders (+ MLP).
 
 Design:
 - Coherent blob: particles move together on a circular orbit mu(t) = (r cos(omega t), r sin(omega t))
@@ -97,7 +97,7 @@ def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng, noi
     return positions
 
 
-def generate_drift_diffusion_positions(
+def generate_particle_orbit_positions(
     t_max,
     num_blob=30,
     num_noise=50,
@@ -237,7 +237,7 @@ def _generate_ground_truth_latent(t_max, omega=0.05, scale=1.0):
     return np.column_stack([scale * np.cos(omega * t), scale * np.sin(omega * t)])
 
 
-def generate_drift_diffusion_process_timeseries(
+def generate_particle_orbit_process_timeseries(
     t_max=200,
     num_blob=30,
     num_noise=50,
@@ -249,7 +249,7 @@ def generate_drift_diffusion_process_timeseries(
     spatial_bounds=10.0,
     seed=None):
     """
-    Generate drift-diffusion blob timeseries ready for CPIC.
+    Generate particle-orbit blob timeseries ready for CPIC.
 
     1) Simulates 2D particles (coherent blob + random noise).
     2) Converts positions to interleaved particle coordinates after x-sort at t=0.
@@ -292,7 +292,7 @@ def generate_drift_diffusion_process_timeseries(
     positions : np.ndarray, shape (t_max, N, 2), float64
         Raw particle positions before standardization (original simulation order).
     """
-    positions = generate_drift_diffusion_positions(
+    positions = generate_particle_orbit_positions(
         t_max=t_max,
         num_blob=num_blob, num_noise=num_noise,
         orbit_radius=orbit_radius, omega=omega,
@@ -309,10 +309,10 @@ def generate_drift_diffusion_process_timeseries(
 
 
 # -----------------------------------------------------------------------------
-# Animation of the drift-diffusion process
+# Animation of the particle-orbit process
 # -----------------------------------------------------------------------------
 
-def animate_drift_diffusion_process(
+def animate_particle_orbit_process(
     t_max=500,
     num_blob=30,
     num_noise=50,
@@ -326,8 +326,8 @@ def animate_drift_diffusion_process(
     interval=50,
 ):
     """
-    Animate the drift-diffusion blob system in 2D: blob (orange), random noise (gray),
-    structured noise (orange). Same style as drift_diffusion_spatial_quadrant.
+    Animate the particle-orbit blob system in 2D: blob (orange), random noise (gray),
+    structured noise (orange).
 
     Parameters
     ----------
@@ -347,7 +347,7 @@ def animate_drift_diffusion_process(
     ani : matplotlib.animation.FuncAnimation
         Use plt.show() to display, or ani.save(...) to save elsewhere.
     """
-    positions = generate_drift_diffusion_positions(
+    positions = generate_particle_orbit_positions(
         t_max=t_max,
         num_blob=num_blob,
         num_noise=num_noise,
@@ -450,7 +450,7 @@ def plot_verification_3d(positions, num_blob, num_noise, path=None):
 
 if __name__ == "__main__":
     _dir = os.path.dirname(os.path.abspath(__file__))
-    ani = animate_drift_diffusion_process(
+    ani = animate_particle_orbit_process(
         t_max=500,
         num_blob=30,
         num_noise=50,
@@ -463,5 +463,5 @@ if __name__ == "__main__":
         seed=42,
         interval=50,
     )
-    #ani.save(os.path.join(_dir, "drift_diffusion_process.gif"), fps=20, writer="pillow")
+    #ani.save(os.path.join(_dir, "particle_orbit_process.gif"), fps=20, writer="pillow")
     plt.show()
