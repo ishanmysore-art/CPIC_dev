@@ -417,7 +417,6 @@ def run_condition(
     *,
     seed: int,
     num_noise: int,
-    sigma_noise: float,
     encoder_spec: EncoderSpec,
     t_max: int,
     train_ratio: float,
@@ -461,11 +460,11 @@ def run_condition(
         orbit_radius=orbit_radius,
         omega=omega,
         sigma_blob=sigma_blob,
-        sigma_noise=sigma_noise,
         noise_ar_coeff=noise_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed,
     )
+    sigma_noise = float(spatial_bounds * np.sqrt(1 - noise_ar_coeff**2))
 
     t_split = int(train_ratio * t_max)
     if t_split <= 2 * T or (t_max - t_split) <= 2 * T:
@@ -718,7 +717,6 @@ if __name__ == "__main__":
 
     seeds = parse_int_list(cfg.get("Sweep", "seeds"))
     num_noise_values = parse_int_list(cfg.get("Sweep", "num_noise_values"))
-    sigma_noise = cfg.getfloat("Sweep", "sigma_noise")
 
     specs = load_encoder_specs(cfg)
 
@@ -776,7 +774,6 @@ if __name__ == "__main__":
                 row = run_condition(
                     seed=seed,
                     num_noise=num_noise,
-                    sigma_noise=sigma_noise,
                     encoder_spec=spec,
                     t_max=t_max,
                     train_ratio=train_ratio,

@@ -104,7 +104,6 @@ def generate_particle_orbit_positions(
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
     noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=None):
@@ -128,10 +127,10 @@ def generate_particle_orbit_positions(
         Angular speed of the circular orbit.
     sigma_blob : float
         Standard deviation of the Gaussian random walk.
-    sigma_noise : float
-        Standard deviation of the noise.
     noise_ar_coeff : float
-        AR(1) coefficient for noise particles.
+        AR(1) coefficient for noise particles. The step noise std is derived as
+        spatial_bounds * sqrt(1 - noise_ar_coeff**2) so the stationary distribution
+        fills [-spatial_bounds, spatial_bounds]^2.
     spatial_bounds : float
         Half-extent of the plane: [-spatial_bounds, spatial_bounds]^2.
     seed : int, optional
@@ -152,6 +151,7 @@ def generate_particle_orbit_positions(
     centroid_y = orbit_radius * np.sin(omega * t_axis)
     positions_blob = _run_blob(t_max, centroid_x, centroid_y, num_blob, sigma_blob, rng)
 
+    sigma_noise = spatial_bounds * np.sqrt(1 - noise_ar_coeff**2)
     positions_noise = _run_random_walk(t_max, num_noise, sigma_noise, spatial_bounds, rng, noise_ar_coeff=noise_ar_coeff)
     
     positions = np.concatenate([positions_blob, positions_noise], axis=1)
@@ -244,7 +244,6 @@ def generate_particle_orbit_process_timeseries(
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
     noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=None):
@@ -264,10 +263,11 @@ def generate_particle_orbit_process_timeseries(
         Particles in coherent blob and random noise.
     orbit_radius, omega : float
         Blob orbit (r cos(\omega t), r sin(\omega t)).
-    sigma_blob, sigma_noise : float
-        Blob spread, and noise-particle step std.
+    sigma_blob : float
+        Blob spread (per-particle diffusion std).
     noise_ar_coeff : float
-        AR(1) coefficient for noise particles.
+        AR(1) coefficient for noise particles. Step noise std is derived as
+        spatial_bounds * sqrt(1 - noise_ar_coeff**2) to fill the domain.
     spatial_bounds : float
         Plane [-spatial_bounds, spatial_bounds]^2.
     seed : int, optional
@@ -296,7 +296,7 @@ def generate_particle_orbit_process_timeseries(
         t_max=t_max,
         num_blob=num_blob, num_noise=num_noise,
         orbit_radius=orbit_radius, omega=omega,
-        sigma_blob=sigma_blob, sigma_noise=sigma_noise,
+        sigma_blob=sigma_blob,
         noise_ar_coeff=noise_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed)
