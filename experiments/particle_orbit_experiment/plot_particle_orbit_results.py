@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+EXPERIMENT_DIR = Path(__file__).resolve().parent
+if str(EXPERIMENT_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPERIMENT_DIR))
+
+from filter_visualization import regenerate_physical_filter_plots
 
 
 VALID_METRICS = {"r2_test_mean", "r2_test_x", "r2_test_y", "mask_active_frac"}
@@ -25,6 +33,8 @@ DEFAULT_ENCODER_PLOT_ENABLED = {
     "ConvSpatial (O)": True,
     "ConvParticle (L)": True,
     "ConvParticle (O)": True,
+    "ConvPhysical (L)": True,
+    "ConvPhysical (O)": True,
     "MaskRandom (L)": False,
     "MaskRandom (O)": False,
     "MaskPIStatic (L)": False,
@@ -42,6 +52,7 @@ ENCODER_BASE_COLOR_MAP = {
     "MLP": "#1f77b4",
     "ConvSpatial": "#ff7f0e",
     "ConvParticle": "#2ca02c",
+    "ConvPhysical": "#17becf",
     "MaskRandom": "#d62728",
     "MaskPIStatic": "#9467bd",
     "MaskPIInitLearned": "#8c564b",
@@ -393,6 +404,99 @@ def plot_from_csv(
     plt.show()
 
 
+def _parse_optional_int_list(text: str | None) -> list[int] | None:
+    if text is None:
+        return None
+    vals = [int(x.strip()) for x in text.split(",") if x.strip()]
+    return vals or None
+
+
+def export_physical_filter_gallery(
+    csv_path: Path,
+    gallery_dir: Path,
+    *,
+    encoder_labels: list[str] | None = None,
+    noise_levels: list[int] | None = None,
+    seeds: list[int] | None = None,
+    regenerate: bool = False,
+) -> list[dict[str, str]]:
+    """
+    Collect or regenerate ConvPhysical filter PNGs from a sweep CSV.
+
+    Copies existing ``filter_plot_path`` / ``filter_orbit_density_path`` files into
+    ``gallery_dir``, or rebuilds PNGs from ``filter_weights_path`` when
+    ``regenerate=True``.
+    """
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        return []
+
+    mask = df["encoder_label"].astype(str).str.contains("ConvPhysical", na=False)
+    if "status" in df.columns:
+        mask &= df["status"].astype(str) == "success"
+    subset = df[mask].copy()
+    if encoder_labels:
+        subset = subset[subset["encoder_label"].isin(encoder_labels)]
+    if noise_levels is not None:
+        subset = subset[subset["num_noise"].isin(noise_levels)]
+    if seeds is not None:
+        subset = subset[subset["seed"].isin(seeds)]
+
+    gallery_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict[str, str]] = []
+
+    for _, row in subset.iterrows():
+        label = str(row["encoder_label"])
+        seed = int(row["seed"])
+        num_noise = int(row["num_noise"])
+        stem = f"{label.replace(' ', '_').replace('(', '').replace(')', '')}_noise{num_noise}_seed{seed}"
+
+        weights_path = str(row.get("filter_weights_path", "") or "").strip()
+        plot_path = str(row.get("filter_plot_path", "") or "").strip()
+        orbit_path = str(row.get("filter_orbit_density_path", "") or "").strip()
+        meta_path = str(row.get("filter_meta_path", "") or "").strip()
+
+        if regenerate and weights_path and Path(weights_path).exists():
+            meta_candidate = meta_path or str(Path(weights_path).with_suffix(".json"))
+            paths = regenerate_physical_filter_plots(
+                weights_path,
+                meta_candidate if Path(meta_candidate).exists() else None,
+            )
+            plot_path = paths.get("filter_plot_path", plot_path)
+            orbit_path = paths.get("filter_orbit_density_path", orbit_path)
+
+        entry = {
+            "encoder_label": label,
+            "seed": str(seed),
+            "num_noise": str(num_noise),
+            "gallery_filter_plot": "",
+            "gallery_orbit_density": "",
+        }
+
+        if plot_path and Path(plot_path).exists():
+            dst = gallery_dir / f"{stem}_filters.png"
+            shutil.copy2(plot_path, dst)
+            entry["gallery_filter_plot"] = str(dst)
+
+        if orbit_path and Path(orbit_path).exists():
+            dst_orbit = gallery_dir / f"{stem}_orbit_density.png"
+            shutil.copy2(orbit_path, dst_orbit)
+            entry["gallery_orbit_density"] = str(dst_orbit)
+
+        if entry["gallery_filter_plot"] or entry["gallery_orbit_density"]:
+            manifest.append(entry)
+
+    if manifest:
+        manifest_path = gallery_dir / "physical_filter_gallery_manifest.csv"
+        pd.DataFrame(manifest).to_csv(manifest_path, index=False)
+        print(f"Wrote {len(manifest)} gallery entries to {gallery_dir}")
+        print(f"Manifest: {manifest_path}")
+    else:
+        print("No ConvPhysical filter artifacts found for the given filters.")
+
+    return manifest
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Replot particle-orbit results from CSV.")
     parser.add_argument("--csv", type=Path, default="experiments/particle_orbit_experiment/res/particle_orbit_probe_runs.csv", help="Path to particle_orbit_probe_runs.csv")
@@ -439,20 +543,74 @@ if __name__ == "__main__":
         default=30,
         help="Number of target particles used to compute target-vs-noise selection lift (default: 30).",
     )
+    parser.add_argument(
+        "--export-physical-filters",
+        action="store_true",
+        help="Copy or regenerate ConvPhysical filter PNGs from CSV paths into a gallery folder.",
+    )
+    parser.add_argument(
+        "--physical-filter-gallery-dir",
+        type=Path,
+        default=None,
+        help="Output directory for --export-physical-filters (default: <csv_parent>/physical_filter_gallery).",
+    )
+    parser.add_argument(
+        "--physical-filter-encoders",
+        type=str,
+        default=None,
+        help="Comma-separated ConvPhysical labels to include (default: all ConvPhysical rows).",
+    )
+    parser.add_argument(
+        "--physical-filter-noise",
+        type=str,
+        default=None,
+        help="Comma-separated num_noise values to include.",
+    )
+    parser.add_argument(
+        "--physical-filter-seeds",
+        type=str,
+        default=None,
+        help="Comma-separated seeds to include.",
+    )
+    parser.add_argument(
+        "--regenerate-physical-filters",
+        action="store_true",
+        help="Rebuild PNGs from saved .npy weights before copying to the gallery.",
+    )
+    parser.add_argument(
+        "--skip-r2-plot",
+        action="store_true",
+        help="Skip the R2 curve plot (useful with --export-physical-filters only).",
+    )
     args = parser.parse_args()
 
     include_encoders = parse_label_list(args.include_encoders)
     exclude_encoders = parse_label_list(args.exclude_encoders)
-    plot_from_csv(
-        args.csv,
-        args.out,
-        args.metric,
-        args.title,
-        std=True,
-        include_encoders=include_encoders,
-        exclude_encoders=exclude_encoders,
-        include_mask_panel=args.include_mask_panel,
-        include_mask_target_panel=args.include_mask_target_panel,
-        num_blob=args.num_blob,
-    )
-    print(f"Wrote {args.out}")
+
+    if args.export_physical_filters:
+        gallery_dir = args.physical_filter_gallery_dir
+        if gallery_dir is None:
+            gallery_dir = args.csv.resolve().parent / "physical_filter_gallery"
+        export_physical_filter_gallery(
+            args.csv,
+            gallery_dir,
+            encoder_labels=parse_label_list(args.physical_filter_encoders) or None,
+            noise_levels=_parse_optional_int_list(args.physical_filter_noise),
+            seeds=_parse_optional_int_list(args.physical_filter_seeds),
+            regenerate=args.regenerate_physical_filters,
+        )
+
+    if not args.skip_r2_plot:
+        plot_from_csv(
+            args.csv,
+            args.out,
+            args.metric,
+            args.title,
+            std=True,
+            include_encoders=include_encoders,
+            exclude_encoders=exclude_encoders,
+            include_mask_panel=args.include_mask_panel,
+            include_mask_target_panel=args.include_mask_target_panel,
+            num_blob=args.num_blob,
+        )
+        print(f"Wrote {args.out}")

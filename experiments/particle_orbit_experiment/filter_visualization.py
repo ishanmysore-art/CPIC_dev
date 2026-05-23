@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -43,8 +46,6 @@ def plot_filter_heatmap_panels(
 ):
     """
     Plot filter magnitude heatmaps in panel chunks.
-
-    This mirrors the notebook visualization style used in particle_orbit.ipynb.
     """
     c_out, k_h = w_mag.shape
     chunks = []
@@ -111,7 +112,13 @@ def plot_physical_filter_heatmaps(
     C_out = weights.shape[0]
     n_rows = max(1, (C_out + n_cols - 1) // n_cols)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 1.6, n_rows * 1.6))
+    # Extra width reserves space for the shared colorbar (avoids overlap on right columns).
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(n_cols * 1.55 + 0.9, n_rows * 1.55),
+        constrained_layout=True,
+    )
     axes = np.array(axes).reshape(n_rows, n_cols)
 
     vmax = float(np.abs(weights[:, 0]).max()) or 1.0
@@ -129,10 +136,16 @@ def plot_physical_filter_heatmaps(
             ax.set_visible(False)
 
     if im is not None:
-        fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.5, pad=0.02, label="weight")
+        fig.colorbar(
+            im,
+            ax=axes,
+            location="right",
+            shrink=0.85,
+            aspect=25,
+            label="weight",
+        )
     if suptitle:
         fig.suptitle(suptitle, fontsize=10)
-    fig.tight_layout()
     return fig, axes
 
 
@@ -339,3 +352,131 @@ def plot_orbit_density_map(
         fig.suptitle(suptitle, fontsize=10)
     fig.tight_layout()
     return fig, ax
+
+
+def save_encoder_filter_artifacts(
+    weights: np.ndarray,
+    meta: dict,
+    *,
+    out_dir: Path | str,
+    stem: str,
+    encoder_type: str,
+    encoder_label: str,
+    layer_idx: int = 0,
+    orbit_grid: np.ndarray | None = None,
+    avg_density: np.ndarray | None = None,
+) -> dict[str, str]:
+    """
+    Save learned conv filter weights and visualization PNGs for a sweep run.
+
+    For ``conv_physical``, writes 2D filter heatmaps and an optional orbit+density
+    overlay. For other conv encoders, writes panel magnitude heatmaps.
+
+    Returns
+    -------
+    dict
+        Keys: ``filter_weights_path``, ``filter_plot_path``, ``filter_orbit_density_path``
+        (empty when not applicable), ``filter_meta_path``.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    npy_path = out_dir / f"{stem}.npy"
+    png_path = out_dir / f"{stem}.png"
+    meta_path = out_dir / f"{stem}.json"
+    orbit_density_path = ""
+
+    np.save(npy_path, weights)
+
+    suptitle = f"{encoder_label} layer {layer_idx}"
+    if encoder_type == "conv_physical":
+        fig, _ = plot_physical_filter_heatmaps(weights, n_cols=8, suptitle=suptitle)
+        fig.savefig(png_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        if orbit_grid is not None and avg_density is not None:
+            orbit_density_path = str(out_dir / f"{stem}_orbit_density.png")
+            arrows = compute_tangential_arrows(orbit_grid)
+            fig2, _ = plot_orbit_density_map(
+                avg_density,
+                orbit_grid,
+                arrows=arrows,
+                spatial_bounds=float(meta.get("spatial_bounds", 3.0)),
+                suptitle=f"{encoder_label} — orbit + density",
+            )
+            fig2.savefig(orbit_density_path, dpi=150, bbox_inches="tight")
+            plt.close(fig2)
+            np.save(out_dir / f"{stem}_orbit_grid.npy", orbit_grid)
+            np.save(out_dir / f"{stem}_avg_density.npy", avg_density)
+    else:
+        w_mag = filter_weights_to_panel_magnitudes(weights)
+        fig, _ = plot_filter_heatmap_panels(
+            w_mag,
+            gap_rows=1,
+            filters_per_panel=8,
+            suptitle=suptitle,
+        )
+        fig.savefig(png_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    payload = {
+        "encoder_type": encoder_type,
+        "encoder_label": encoder_label,
+        "layer_idx": layer_idx,
+        "shape": list(weights.shape),
+        "meta": meta,
+        "filter_weights_path": str(npy_path),
+        "filter_plot_path": str(png_path),
+        "filter_orbit_density_path": orbit_density_path,
+    }
+    if orbit_grid is not None:
+        payload["orbit_grid_path"] = str(out_dir / f"{stem}_orbit_grid.npy")
+    if avg_density is not None:
+        payload["avg_density_path"] = str(out_dir / f"{stem}_avg_density.npy")
+
+    with meta_path.open("w") as f:
+        json.dump(payload, f, indent=2)
+
+    payload["filter_meta_path"] = str(meta_path)
+    return payload
+
+
+def regenerate_physical_filter_plots(
+    weights_path: Path | str,
+    meta_path: Path | str | None = None,
+    *,
+    out_dir: Path | str | None = None,
+    stem: str | None = None,
+) -> dict[str, str]:
+    """Rebuild ConvPhysical filter PNGs from saved ``.npy`` / ``.json`` artifacts."""
+    weights_path = Path(weights_path)
+    out_dir = Path(out_dir or weights_path.parent)
+    stem = stem or weights_path.stem
+
+    weights = np.load(weights_path)
+    meta: dict = {}
+    encoder_label = "ConvPhysical"
+    layer_idx = 0
+    if meta_path is not None and Path(meta_path).exists():
+        with Path(meta_path).open() as f:
+            payload = json.load(f)
+        meta = payload.get("meta", {})
+        encoder_label = payload.get("encoder_label", encoder_label)
+        layer_idx = int(payload.get("layer_idx", 0))
+
+    orbit_grid_path = out_dir / f"{stem}_orbit_grid.npy"
+    avg_density_path = out_dir / f"{stem}_avg_density.npy"
+    orbit_grid = np.load(orbit_grid_path) if orbit_grid_path.exists() else None
+    avg_density = np.load(avg_density_path) if avg_density_path.exists() else None
+
+    return save_encoder_filter_artifacts(
+        weights,
+        meta,
+        out_dir=out_dir,
+        stem=stem,
+        encoder_type="conv_physical",
+        encoder_label=encoder_label,
+        layer_idx=layer_idx,
+        orbit_grid=orbit_grid,
+        avg_density=avg_density,
+    )

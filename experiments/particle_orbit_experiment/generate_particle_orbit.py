@@ -319,7 +319,6 @@ def animate_particle_orbit_process(
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
     noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=42,
@@ -354,7 +353,6 @@ def animate_particle_orbit_process(
         orbit_radius=orbit_radius,
         omega=omega,
         sigma_blob=sigma_blob,
-        sigma_noise=sigma_noise,
         noise_ar_coeff=noise_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed
@@ -457,7 +455,6 @@ if __name__ == "__main__":
         orbit_radius=3.0,
         omega=0.05,
         sigma_blob=0.7,
-        sigma_noise=0.5,
         noise_ar_coeff=0.8,
         spatial_bounds=10.0,
         seed=42,

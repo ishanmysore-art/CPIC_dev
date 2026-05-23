@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
-import json
 import sys
 from configparser import ConfigParser
 from dataclasses import dataclass
@@ -35,12 +34,8 @@ for folder in (SRC_PATH, DATA_GEN_PATH):
 from cpic import CPIC
 from cpic.utils.data import PastFutureDataset
 from filter_visualization import (
-    filter_weights_to_panel_magnitudes,
-    plot_filter_heatmap_panels,
-    plot_physical_filter_heatmaps,
-    plot_orbit_density_map,
+    save_encoder_filter_artifacts,
     compute_orbit_in_grid_coords,
-    compute_tangential_arrows,
     compute_avg_density_grid,
 )
 from generate_particle_orbit import generate_particle_orbit_process_timeseries # type: ignore[reportMissingImports]
@@ -328,59 +323,39 @@ def save_conv_filter_artifacts(
     layer_idx: int,
     orbit_grid: np.ndarray | None = None,
     avg_density: np.ndarray | None = None,
-) -> tuple[str, str]:
-    """Save convolution filter weights and a compact heatmap summary."""
+) -> dict[str, str]:
+    """Save convolution filter weights and heatmap summaries (physical or panel style)."""
+    empty = {
+        "filter_weights_path": "",
+        "filter_plot_path": "",
+        "filter_orbit_density_path": "",
+        "filter_meta_path": "",
+    }
     if not hasattr(model.encoder, "get_filters"):
-        return "", ""
+        return empty
     try:
         weights, meta = model.encoder.get_filters(layer_idx=layer_idx)
     except Exception:
-        return "", ""
+        return empty
+
+    enc_type = getattr(model.encoder, "encoder_type", "")
+    subdir = "conv_physical" if enc_type == "conv_physical" else "conv"
+    target_dir = out_dir / subdir
 
     safe_label = encoder_label.replace(" ", "_").replace("(", "").replace(")", "")
     stem = f"{safe_label}_noise{num_noise}_seed{seed}_layer{layer_idx}"
-    npy_path = out_dir / f"{stem}.npy"
-    png_path = out_dir / f"{stem}.png"
-    meta_path = out_dir / f"{stem}.json"
-
-    np.save(npy_path, weights)
-
-    is_physical = getattr(model.encoder, "encoder_type", "") == "conv_physical"
-    if is_physical:
-        fig, _ = plot_physical_filter_heatmaps(
-            weights,
-            n_cols=8,
-            suptitle=f"{encoder_label} layer {layer_idx}",
-        )
-        fig.savefig(png_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-
-        if orbit_grid is not None and avg_density is not None:
-            arrows = compute_tangential_arrows(orbit_grid)
-            density_png = out_dir / f"{stem}_orbit_density.png"
-            fig2, _ = plot_orbit_density_map(
-                avg_density,
-                orbit_grid,
-                arrows=arrows,
-                spatial_bounds=meta.get("spatial_bounds", 3.0),
-                suptitle=f"{encoder_label} — orbit + density (noise={num_noise}, seed={seed})",
-            )
-            fig2.savefig(density_png, dpi=150, bbox_inches="tight")
-            plt.close(fig2)
-    else:
-        w_mag = filter_weights_to_panel_magnitudes(weights)
-        fig, _ = plot_filter_heatmap_panels(
-            w_mag,
-            gap_rows=1,
-            filters_per_panel=8,
-            suptitle=f"{encoder_label} layer {layer_idx}",
-        )
-        fig.savefig(png_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-
-    with meta_path.open("w") as f:
-        json.dump({"shape": list(weights.shape), "meta": meta}, f)
-    return str(npy_path), str(png_path)
+    paths = save_encoder_filter_artifacts(
+        weights,
+        meta,
+        out_dir=target_dir,
+        stem=stem,
+        encoder_type=enc_type,
+        encoder_label=encoder_label,
+        layer_idx=layer_idx,
+        orbit_grid=orbit_grid if enc_type == "conv_physical" else None,
+        avg_density=avg_density if enc_type == "conv_physical" else None,
+    )
+    return paths
 
 
 def build_past_windows_and_gt(
@@ -567,6 +542,8 @@ def run_condition(
 
     filter_weights_path = ""
     filter_plot_path = ""
+    filter_orbit_density_path = ""
+    filter_meta_path = ""
     if model is not None and status == "success" and save_filter_viz:
         orbit_grid = None
         avg_density = None
@@ -587,7 +564,7 @@ def run_condition(
             except Exception as exc:
                 print(f"[WARN] Could not compute orbit/density for conv_physical: {exc}")
 
-        filter_weights_path, filter_plot_path = save_conv_filter_artifacts(
+        filter_paths = save_conv_filter_artifacts(
             model,
             filter_out_dir,
             seed=seed,
@@ -597,6 +574,10 @@ def run_condition(
             orbit_grid=orbit_grid,
             avg_density=avg_density,
         )
+        filter_weights_path = filter_paths.get("filter_weights_path", "")
+        filter_plot_path = filter_paths.get("filter_plot_path", "")
+        filter_orbit_density_path = filter_paths.get("filter_orbit_density_path", "")
+        filter_meta_path = filter_paths.get("filter_meta_path", "")
 
     if model is not None:
         del model
@@ -621,6 +602,8 @@ def run_condition(
         "pi_lag_agg": pi_lag_agg,
         "filter_weights_path": filter_weights_path,
         "filter_plot_path": filter_plot_path,
+        "filter_orbit_density_path": filter_orbit_density_path,
+        "filter_meta_path": filter_meta_path,
         "tensorboard_log_dir": tensorboard_log_dir,
         **metrics,
     }
