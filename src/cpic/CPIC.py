@@ -441,8 +441,6 @@ class CPIC(nn.Module):
                 # Check if gradients are NaN
                 grad_bool = True
                 for name, param in ((n, p) for n, p in self.named_parameters() if p.requires_grad):
-                    if param.grad is None:
-                        continue
                     if not torch.isfinite(param.grad).all():
                         print(epoch, name, torch.isfinite(param.grad).all())
                         grad_bool = False
@@ -808,8 +806,6 @@ class SparseCPIC(CPIC):
                 # Check if gradients are NaN
                 grad_bool = True
                 for name, param in ((n, p) for n, p in self.named_parameters() if p.requires_grad):
-                    if param.grad is None:
-                        continue
                     if not torch.isfinite(param.grad).all():
                         print(epoch, name, torch.isfinite(param.grad).all())
                         grad_bool = False

@@ -451,14 +451,14 @@ if __name__ == "__main__":
     ani = animate_particle_orbit_process(
         t_max=500,
         num_blob=30,
-        num_noise=50,
+        num_noise=80,
         orbit_radius=3.0,
         omega=0.05,
-        sigma_blob=0.7,
+        sigma_blob=0.1,
         noise_ar_coeff=0.8,
         spatial_bounds=10.0,
         seed=42,
         interval=50,
     )
-    #ani.save(os.path.join(_dir, "particle_orbit_process.gif"), fps=20, writer="pillow")
+    ani.save(os.path.join(_dir, "particle_orbit_process.gif"), fps=20, writer="pillow")
     plt.show()

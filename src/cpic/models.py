@@ -340,15 +340,15 @@ class ConvPhysicalEncoder(nn.Module):
 
         # Scatter particle counts into (BT, 1, H, W)
         BT = batch_size * time_len
-        grid_flat = torch.zeros(BT, self.grid_size * self.grid_size, device=x.device, dtype=x.dtype)
-        ones = torch.ones(BT, self.num_particles, device=x.device, dtype=x.dtype)
-        grid_flat.scatter_add_(1, flat_idx, ones)
-        grid = grid_flat.view(BT, 1, self.grid_size, self.grid_size)
+        grid_flat = torch.zeros(BT, self.grid_size * self.grid_size, device=x.device, dtype=x.dtype) # (BT, H * W)
+        ones = torch.ones(BT, self.num_particles, device=x.device, dtype=x.dtype) # (BT, N)
+        grid_flat.scatter_add_(1, flat_idx, ones) # (BT, H * W)
+        grid = grid_flat.view(BT, 1, self.grid_size, self.grid_size) # (BT, 1, H, W)
 
-        out = self.conv_seq(grid)
-        out = out.flatten(start_dim=1)
-        out = self.linear(out)
-        out = out.view(batch_size, time_len, self.output_dim)
+        out = self.conv_seq(grid) # (BT, channels, H, W)
+        out = out.flatten(start_dim=1) # (BT, channels * H * W)
+        out = self.linear(out) # (BT, output_dim)
+        out = out.view(batch_size, time_len, self.output_dim) # (batch, T, output_dim)
 
         if out.shape[1] == 1:
             out = out.squeeze(1)
