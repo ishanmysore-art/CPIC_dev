@@ -12,6 +12,8 @@ dist/
 **/.DS_Store
 **/fig
 **/res
+**/res_v*/
+**/logs/
 **/kernel_visualizations
 **/data
 **/.ipynb_checkpoints/
@@ -24,9 +26,10 @@ htmlcov/
 *.so
 *.gif
 *.png
+CLAUDE.md
 
-# synthetic data
-synthetic/data/
+# synthetic lorenz data
+experiments/synthetic_lorenz_experiment/data/
 
 # video experiment results
 experiments/video_experiment/res/

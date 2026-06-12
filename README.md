@@ -57,9 +57,11 @@ pip install "cpic[dca]"
   - CPIC experiments (M1, HC, Temp, MS): <code>real_data_experiment_standard.py</code>, <code>real_data_experiment_standard_beta.py</code>
   - Competitor baselines: <code>real_data_competitors.py</code>
   - Summaries/post-analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>
-- Drift diffusion experiment: <code>experiments/drift_diffusion_experiment/</code>
-  - Notebook workflow: <code>drift_diffusion.ipynb</code>
-  - Data generation script: <code>generate_drift_diffusion.py</code>
+- Particle orbit experiment: <code>experiments/particle_orbit_experiment/</code>
+  - Notebook workflow: <code>particle_orbit.ipynb</code>
+  - Data generation script: <code>generate_particle_orbit.py</code>
+  - Config-driven batch encoder sweep: <code>run_particle_orbit_experiment.py</code>
+  - Re-plot saved CSV results: <code>plot_particle_orbit_results.py</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
   - Train then visualize with one matching <code>--seed</code> / <code>--signature</code>: <code>run_sparse_cpic_train_and_visualize.py</code> (see README, “Train and visualize in one step”)
@@ -83,7 +85,7 @@ Experiment configurations are grouped under:
 - <code>experiments/synthetic_lorenz_experiment/config/</code>
 - <code>experiments/real_data_experiments/config/</code>
 - <code>experiments/video_experiment/config/</code>
-- <code>experiments/drift_diffusion_experiment/config/</code>
+- <code>experiments/particle_orbit_experiment/config/</code>
 
 ## Figures
 Figures and generated outputs are stored inside each experiment folder, e.g.:

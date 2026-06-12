@@ -1,10 +1,10 @@
 """
-Spatial drift-diffusion generator for conv encoders (+ MLP).
+Spatial particle-orbit generator for conv encoders (+ MLP).
 
 Design:
 - Coherent blob: particles move together on a circular orbit mu(t) = (r cos(omega t), r sin(omega t))
   with per-particle diffusion and observation noise.
-- Random noise: pure 2D random walks.
+- Random noise: random walk with AR(1) coefficient ("a discount factor of the previous position's noise").
 - Output: timeseries (t_max, N*2) ready for CPIC; interleaved particle coordinates
   [x0,y0,x1,y1,...] after sorting particles by x at t=0 (label-agnostic, geometric order).
 
@@ -63,9 +63,9 @@ def _run_blob(t_max, centroid_x, centroid_y, num_particles, sigma_blob, rng):
     return positions
 
 
-def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng):
+def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng, noise_ar_coeff=0.8):
     """
-    Positions (t_max, num_particles, 2): init uniform in [-B,B]^2, then 2D random walk.
+    Positions (t_max, num_particles, 2): init uniform in [-B,B]^2, then AR(1) dynamics.
     
     Parameters
     ----------
@@ -79,6 +79,9 @@ def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng):
         Half-extent of the plane: [-spatial_bounds, spatial_bounds]^2.
     rng : np.random.Generator
         Random number generator.
+    noise_ar_coeff : float, optional
+        AR(1) coefficient for noise particles. Should satisfy 0 <= coeff < 1 for
+        stable mean-reverting dynamics. coeff=1 corresponds to a random walk. Default is 0.8.
 
     Returns
     -------
@@ -87,19 +90,21 @@ def _run_random_walk(t_max, num_particles, sigma_noise, spatial_bounds, rng):
     """
     positions = np.zeros((t_max, num_particles, 2))
     positions[0] = rng.uniform(-spatial_bounds, spatial_bounds, (num_particles, 2))
+    if not (0.0 <= noise_ar_coeff < 1.0):
+        raise ValueError(f"noise_ar_coeff must be in [0, 1), got {noise_ar_coeff}")
     for t in range(1, t_max):
-        positions[t] = positions[t - 1] + rng.normal(0, sigma_noise, (num_particles, 2))
+        positions[t] = noise_ar_coeff * positions[t - 1] + rng.normal(0, sigma_noise, (num_particles, 2))
     return positions
 
 
-def generate_drift_diffusion_positions(
+def generate_particle_orbit_positions(
     t_max,
     num_blob=30,
     num_noise=50,
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
+    noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=None):
     """
@@ -122,8 +127,10 @@ def generate_drift_diffusion_positions(
         Angular speed of the circular orbit.
     sigma_blob : float
         Standard deviation of the Gaussian random walk.
-    sigma_noise : float
-        Standard deviation of the noise.
+    noise_ar_coeff : float
+        AR(1) coefficient for noise particles. The step noise std is derived as
+        spatial_bounds * sqrt(1 - noise_ar_coeff**2) so the stationary distribution
+        fills [-spatial_bounds, spatial_bounds]^2.
     spatial_bounds : float
         Half-extent of the plane: [-spatial_bounds, spatial_bounds]^2.
     seed : int, optional
@@ -144,7 +151,8 @@ def generate_drift_diffusion_positions(
     centroid_y = orbit_radius * np.sin(omega * t_axis)
     positions_blob = _run_blob(t_max, centroid_x, centroid_y, num_blob, sigma_blob, rng)
 
-    positions_noise = _run_random_walk(t_max, num_noise, sigma_noise, spatial_bounds, rng)
+    sigma_noise = spatial_bounds * np.sqrt(1 - noise_ar_coeff**2)
+    positions_noise = _run_random_walk(t_max, num_noise, sigma_noise, spatial_bounds, rng, noise_ar_coeff=noise_ar_coeff)
     
     positions = np.concatenate([positions_blob, positions_noise], axis=1)
     
@@ -179,6 +187,10 @@ def _positions_to_particle_timeseries(positions, seed_positions=None):
     particle_order : np.ndarray, shape (N,), dtype int
         Permutation indices such that sorted particle index i is original particle particle_order[i].
         Feature columns 2*i:2*i+2 correspond to that particle after sorting.
+    standardization_mean : np.ndarray, shape (N*2,), dtype float32
+        Per-feature mean used for standardization.
+    standardization_std : np.ndarray, shape (N*2,), dtype float32
+        Per-feature std used for standardization.
     """
     t_max, N, _ = positions.shape
     if seed_positions is None:
@@ -197,7 +209,7 @@ def _positions_to_particle_timeseries(positions, seed_positions=None):
     std = flat.std(axis=0, keepdims=True)
     std[std == 0] = 1.0
     data = np.float32((flat - mean) / std)
-    return data, particle_order
+    return data, particle_order, mean.squeeze(0).astype(np.float32), std.squeeze(0).astype(np.float32)
 
 
 # -----------------------------------------------------------------------------
@@ -225,18 +237,18 @@ def _generate_ground_truth_latent(t_max, omega=0.05, scale=1.0):
     return np.column_stack([scale * np.cos(omega * t), scale * np.sin(omega * t)])
 
 
-def generate_drift_diffusion_process_timeseries(
+def generate_particle_orbit_process_timeseries(
     t_max=200,
     num_blob=30,
     num_noise=50,
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
+    noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=None):
     """
-    Generate drift-diffusion blob timeseries ready for CPIC.
+    Generate particle-orbit blob timeseries ready for CPIC.
 
     1) Simulates 2D particles (coherent blob + random noise).
     2) Converts positions to interleaved particle coordinates after x-sort at t=0.
@@ -251,8 +263,11 @@ def generate_drift_diffusion_process_timeseries(
         Particles in coherent blob and random noise.
     orbit_radius, omega : float
         Blob orbit (r cos(\omega t), r sin(\omega t)).
-    sigma_blob, sigma_noise : float
-        Blob spread, and noise-particle step std.
+    sigma_blob : float
+        Blob spread (per-particle diffusion std).
+    noise_ar_coeff : float
+        AR(1) coefficient for noise particles. Step noise std is derived as
+        spatial_bounds * sqrt(1 - noise_ar_coeff**2) to fill the domain.
     spatial_bounds : float
         Plane [-spatial_bounds, spatial_bounds]^2.
     seed : int, optional
@@ -270,41 +285,48 @@ def generate_drift_diffusion_process_timeseries(
         1 = coherent blob, 0 = noise, in **original** simulation order (before sorting).
         particle_labels[particle_order] gives labels aligned with the sorted feature columns
         (pair [2*i, 2*i+1] corresponds to label particle_labels[particle_order[i]]).
+    standardization_mean : np.ndarray, shape (N*2,), float32
+        Per-feature mean used for standardization (for inverse-transforming to grid coords).
+    standardization_std : np.ndarray, shape (N*2,), float32
+        Per-feature std used for standardization.
+    positions : np.ndarray, shape (t_max, N, 2), float64
+        Raw particle positions before standardization (original simulation order).
     """
-    positions = generate_drift_diffusion_positions(
+    positions = generate_particle_orbit_positions(
         t_max=t_max,
         num_blob=num_blob, num_noise=num_noise,
         orbit_radius=orbit_radius, omega=omega,
-        sigma_blob=sigma_blob, sigma_noise=sigma_noise,
+        sigma_blob=sigma_blob,
+        noise_ar_coeff=noise_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed)
     N = num_blob + num_noise
     particle_labels = np.zeros(N, dtype=np.int8)
     particle_labels[:num_blob] = 1
-    data, particle_order = _positions_to_particle_timeseries(positions)
+    data, particle_order, standardization_mean, standardization_std = _positions_to_particle_timeseries(positions)
     ground_truth_latent = _generate_ground_truth_latent(t_max, omega=omega, scale=1.0)
-    return data, ground_truth_latent, particle_order, particle_labels
+    return data, ground_truth_latent, particle_order, particle_labels, standardization_mean, standardization_std, positions
 
 
 # -----------------------------------------------------------------------------
-# Animation of the drift-diffusion process
+# Animation of the particle-orbit process
 # -----------------------------------------------------------------------------
 
-def animate_drift_diffusion_process(
+def animate_particle_orbit_process(
     t_max=500,
     num_blob=30,
     num_noise=50,
     orbit_radius=3.0,
     omega=0.05,
     sigma_blob=0.7,
-    sigma_noise=0.5,
+    noise_ar_coeff=0.8,
     spatial_bounds=10.0,
     seed=42,
     interval=50,
 ):
     """
-    Animate the drift-diffusion blob system in 2D: blob (orange), random noise (gray),
-    structured noise (orange). Same style as drift_diffusion_spatial_quadrant.
+    Animate the particle-orbit blob system in 2D: blob (orange), random noise (gray),
+    structured noise (orange).
 
     Parameters
     ----------
@@ -324,14 +346,14 @@ def animate_drift_diffusion_process(
     ani : matplotlib.animation.FuncAnimation
         Use plt.show() to display, or ani.save(...) to save elsewhere.
     """
-    positions = generate_drift_diffusion_positions(
+    positions = generate_particle_orbit_positions(
         t_max=t_max,
         num_blob=num_blob,
         num_noise=num_noise,
         orbit_radius=orbit_radius,
         omega=omega,
         sigma_blob=sigma_blob,
-        sigma_noise=sigma_noise,
+        noise_ar_coeff=noise_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed
         )
@@ -426,17 +448,17 @@ def plot_verification_3d(positions, num_blob, num_noise, path=None):
 
 if __name__ == "__main__":
     _dir = os.path.dirname(os.path.abspath(__file__))
-    ani = animate_drift_diffusion_process(
+    ani = animate_particle_orbit_process(
         t_max=500,
         num_blob=30,
-        num_noise=50,
+        num_noise=80,
         orbit_radius=3.0,
         omega=0.05,
-        sigma_blob=0.7,
-        sigma_noise=0.5,
+        sigma_blob=0.1,
+        noise_ar_coeff=0.8,
         spatial_bounds=10.0,
         seed=42,
         interval=50,
     )
-    #ani.save(os.path.join(_dir, "drift_diffusion_process.gif"), fps=20, writer="pillow")
+    ani.save(os.path.join(_dir, "particle_orbit_process.gif"), fps=20, writer="pillow")
     plt.show()

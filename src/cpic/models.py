@@ -154,6 +154,219 @@ class ConvSpatialEncoder(nn.Module):
         return w, meta
 
 
+class ConvSpatialParticle2DEncoder(nn.Module):
+    """
+    Convolutional encoder over a per-timestep particle layout.
+    Input is expected as flattened interleaved coordinates (x0, y0, ..., xN, yN),
+    and is internally reshaped per timestep to (num_particles, 2).
+
+    Input (batch, T, input_dim=2*num_particles) -> output (batch, T, output_dim).
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation="relu", T=None, kernel_size_particles=5, kernel_size_coords=2, stride_particles=1, padding_particles=2):
+        super().__init__()
+
+        if input_dim % 2 != 0:
+            raise ValueError(f"ConvSpatialParticle2DEncoder expects even input_dim (x/y pairs), got {input_dim}.")
+        if kernel_size_coords not in (1, 2):
+            raise ValueError("kernel_size_coords must be 1 or 2.")
+
+        def conv_out_dim(length, kernel_size, stride, padding):
+            return (length + (2 * padding) - kernel_size) // stride + 1
+
+        self.num_particles = input_dim // 2
+        self.output_dim = output_dim
+
+        if activation == 'relu':
+            activation_f = nn.ReLU()
+        else:
+            activation_f = nn.ReLU()
+
+        conv_layers = []
+
+        conv_layers.append(nn.Conv2d(1, hidden_dim, kernel_size=(kernel_size_particles, kernel_size_coords), stride=(stride_particles, 1), padding=(padding_particles, 0)))
+        conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+        conv_layers.append(activation_f)
+
+        p_out = conv_out_dim(self.num_particles, kernel_size_particles, stride_particles, padding_particles)
+        coord_out = 3 - kernel_size_coords # width 2 with no padding, stride 1
+
+        for _ in range(n_layers):
+            conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size_particles, 1), stride=(stride_particles, 1), padding=(padding_particles, 0)))
+            p_out = conv_out_dim(p_out, kernel_size_particles, stride_particles, padding_particles)
+
+            conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+            conv_layers.append(activation_f)
+
+        flattened_dim = hidden_dim * p_out * coord_out
+        if flattened_dim <= 0:
+            raise ValueError(f"flattened_dim must be positive, got {flattened_dim}")
+
+        self.conv_seq = nn.Sequential(*conv_layers)
+        self.flattened_dim = flattened_dim
+        self.linear = nn.Linear(flattened_dim, output_dim)
+
+    def forward(self, x):
+        # x: (batch, T, 2*num_particles) or (batch, 2*num_particles)
+        if x.ndim == 2:
+            batch_size, feat_dim = x.shape
+            time_len = 1
+            x = x.view(batch_size, 1, feat_dim)
+        elif x.ndim == 3:
+            batch_size, time_len, feat_dim = x.shape
+        else:
+            raise ValueError(f"Expected x.ndim in {{2,3}}, got {x.ndim}")
+
+        if feat_dim != self.num_particles * 2:
+            raise ValueError(f"Expected feature dim {self.num_particles * 2}, got {feat_dim}.")
+
+        x_2d = x.view(batch_size * time_len, self.num_particles, 2).unsqueeze(1) # (batch * T, 1, num_particles, 2)
+        out = self.conv_seq(x_2d) # (batch * T, channels, hidden_dim, num_particles)
+        out = out.flatten(start_dim=1) # (batch * T, channels * hidden_dim * num_particles)
+        out = self.linear(out) # (batch * T, output_dim)
+        out = out.view(batch_size, time_len, self.output_dim) # (batch, T, output_dim)
+
+        # if T is 1, change output to (batch, output_dim)
+        if out.shape[1] == 1:
+            out = out.squeeze(1) 
+        return out
+
+    def get_filters(self, layer_idx=0):
+        conv2ds = [m for m in self.conv_seq if isinstance(m, nn.Conv2d)]
+        if layer_idx < 0 or layer_idx >= len(conv2ds):
+            raise ValueError(f"layer_idx must be in [0, {len(conv2ds) - 1}], got {layer_idx}")
+        layer = conv2ds[layer_idx]
+        w = layer.weight.detach().cpu().numpy()
+        meta = {"padding": layer.padding, "stride": layer.stride, "kernel_size": layer.kernel_size}
+        return w, meta
+
+
+class ConvPhysicalEncoder(nn.Module):
+    """
+    Convolutional encoder over a 2D physical occupancy grid.
+
+    At each timestep, interleaved particle coordinates [x0,y0,...,xN,yN] are binned
+    onto a (grid_size x grid_size) count grid over [-spatial_bounds, spatial_bounds]^2.
+    Standard symmetric 2D convolutions are applied over this spatial grid, giving
+    filters that are directly interpretable as spatial detectors in physical space.
+
+    Input (batch, T, input_dim=2*num_particles) -> output (batch, T, output_dim).
+
+    Parameters
+    ----------
+    input_dim : int
+        Must be even (2 * num_particles).
+    hidden_dim : int
+        Conv channel count and output projection width.
+    output_dim : int
+        Latent dimension.
+    n_layers : int
+        Additional hidden conv layers (total = n_layers + 1).
+    activation : str
+        Activation function ('relu').
+    T : int, optional
+        Accepted for API consistency; not used internally.
+    grid_size : int
+        H = W of the 2D spatial grid.
+    spatial_bounds : float
+        Binning range: [-spatial_bounds, spatial_bounds]^2. Should match the
+        coordinate units of the encoder input (standardized by default).
+    kernel_size : int
+        Square conv kernel size applied symmetrically to both spatial axes.
+    stride : int
+        Conv stride (symmetric).
+    padding : int
+        Conv padding (symmetric).
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=0, activation='relu',
+                 T=None, grid_size=20, spatial_bounds=3.0, kernel_size=3, stride=1, padding=1):
+        super().__init__()
+
+        if input_dim % 2 != 0:
+            raise ValueError(f"ConvPhysicalEncoder expects even input_dim (x/y pairs), got {input_dim}.")
+
+        def conv_physical_output_dim(size, k, s, p):
+            return (size + 2 * p - k) // s + 1
+
+        self.num_particles = input_dim // 2
+        self.output_dim = output_dim
+        self.grid_size = grid_size
+        self.spatial_bounds = spatial_bounds
+
+        activation_f = nn.ReLU()
+
+        conv_layers = []
+        conv_layers.append(nn.Conv2d(1, hidden_dim, kernel_size=(kernel_size, kernel_size), stride=(stride, stride), padding=(padding, padding)))
+        conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+        conv_layers.append(activation_f)
+
+        h_out = conv_physical_output_dim(grid_size, kernel_size, stride, padding)
+        for _ in range(n_layers):
+            conv_layers.append(nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(kernel_size, kernel_size), stride=(stride, stride), padding=(padding, padding)))
+            conv_layers.append(nn.BatchNorm2d(hidden_dim, eps=1e-5))
+            conv_layers.append(activation_f)
+            h_out = conv_physical_output_dim(h_out, kernel_size, stride, padding)
+
+        flattened_dim = hidden_dim * h_out * h_out
+        if flattened_dim <= 0:
+            raise ValueError(f"flattened_dim={flattened_dim}. Reduce kernel_size or increase grid_size.")
+
+        self.conv_seq = nn.Sequential(*conv_layers)
+        self.flattened_dim = flattened_dim
+        self.linear = nn.Linear(flattened_dim, output_dim)
+
+    def forward(self, x):
+        # x: (batch, T, 2*num_particles) or (batch, 2*num_particles)
+        if x.ndim == 2:
+            batch_size, feat_dim = x.shape
+            time_len = 1
+            x = x.view(batch_size, 1, feat_dim)
+        elif x.ndim == 3:
+            batch_size, time_len, feat_dim = x.shape
+        else:
+            raise ValueError(f"Expected x.ndim in {{2,3}}, got {x.ndim}")
+
+        # Recover per-particle (x, y): (BT, N, 2)
+        x_particles = x.view(batch_size * time_len, self.num_particles, 2)
+
+        # Bin to [0, grid_size-1] integer indices
+        coords = x_particles.clamp(-self.spatial_bounds, self.spatial_bounds)
+        scale = self.grid_size / (2.0 * self.spatial_bounds)
+        idx = ((coords + self.spatial_bounds) * scale).long().clamp(0, self.grid_size - 1)
+        i_col = idx[..., 0]  # x -> column
+        i_row = idx[..., 1]  # y -> row
+        flat_idx = i_row * self.grid_size + i_col  # (BT, N)
+
+        # Scatter particle counts into (BT, 1, H, W)
+        BT = batch_size * time_len
+        grid_flat = torch.zeros(BT, self.grid_size * self.grid_size, device=x.device, dtype=x.dtype) # (BT, H * W)
+        ones = torch.ones(BT, self.num_particles, device=x.device, dtype=x.dtype) # (BT, N)
+        grid_flat.scatter_add_(1, flat_idx, ones) # (BT, H * W)
+        grid = grid_flat.view(BT, 1, self.grid_size, self.grid_size) # (BT, 1, H, W)
+
+        out = self.conv_seq(grid) # (BT, channels, H, W)
+        out = out.flatten(start_dim=1) # (BT, channels * H * W)
+        out = self.linear(out) # (BT, output_dim)
+        out = out.view(batch_size, time_len, self.output_dim) # (batch, T, output_dim)
+
+        if out.shape[1] == 1:
+            out = out.squeeze(1)
+        return out
+
+    def get_filters(self, layer_idx=0):
+        conv2ds = [m for m in self.conv_seq if isinstance(m, nn.Conv2d)]
+        if layer_idx < 0 or layer_idx >= len(conv2ds):
+            raise ValueError(f"layer_idx must be in [0, {len(conv2ds) - 1}], got {layer_idx}")
+        layer = conv2ds[layer_idx]
+        w = layer.weight.detach().cpu().numpy()
+        meta = {
+            "padding": layer.padding, "stride": layer.stride, "kernel_size": layer.kernel_size,
+            "grid_size": self.grid_size, "spatial_bounds": self.spatial_bounds,
+        }
+        return w, meta
+
+
 class ConvSpatiotemporalEncoder(nn.Module):
     """
     2D convolutional encoder that convolves over both feature and time dimensions.
@@ -298,6 +511,112 @@ class ConvTemporalEncoder(nn.Module):
         return out
 
 
+class FeatureMaskMLPEncoder(nn.Module):
+    """
+    Feature-wise masking followed by an MLP projection.
+    Input (batch, T, input_dim) or (batch, input_dim) -> output (..., output_dim).
+
+    The encoder learns (or uses fixed) per-feature gates and applies them
+    multiplicatively before passing the masked input through a standard MLP.
+    This keeps the representation model flexible while making feature
+    importance explicit and easy to inspect via ``get_feature_mask()``.
+
+    Parameters
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    hidden_dim : int
+        Number of channels in hidden layers & output layer
+    output_dim : int
+        Output feature dimension (ydim)
+    n_layers : int, optional
+        Number of hidden layers
+    activation : str, optional
+        Activation function ('relu' by default)
+    T : int, optional
+        Time window
+    mask_learnable : bool, optional
+        Whether to learn the mask
+    mask_init : str, optional
+        Initialization for the mask. "random" initializes logits ~ N(0,1).
+    mask_init_values : torch.Tensor, optional
+        Initialization values for the mask
+
+    Attributes
+    ----------
+    input_dim : int
+        Input feature dimension (xdim)
+    mask_learnable : bool
+        Whether to learn the mask
+    mask_init : str
+        Initialization for the mask
+    mask_init_values : torch.Tensor
+        Initialization values for the mask
+    mask_logits : nn.Parameter
+        Learnable logits (sigmoid -> mask probabilities in [0, 1])
+    projector : nn.Module
+        MLP projection
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, activation="relu", T=None, mask_learnable=True, mask_init="ones", mask_init_values=None):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+
+        if mask_init == "random" and mask_init_values is None:
+            # Random mode initializes the *logits* directly in unconstrained space. 
+            # The resulting mask is sigmoid(logits) in (0,1) (i.e. continuous gates in [0, 1]).
+            logits = torch.randn(input_dim, dtype=torch.float32)
+        else:
+            # For explicit init scores (PI or user-provided), values are treated as probabilities and mapped into logit space.
+            if mask_init_values is not None:
+                init_values = torch.as_tensor(mask_init_values, dtype=torch.float32)
+                if init_values.numel() != input_dim:
+                    raise ValueError(f"mask_init_values must have length {input_dim}, got {init_values.numel()}")
+                init_values = init_values.clamp(0.0, 1.0)
+            else:
+                if mask_init == "pi":
+                    # Fallback for pi mode when explicit scores are not provided.
+                    init_values = torch.full((input_dim,), 0.5, dtype=torch.float32)
+                elif mask_init == "ones":
+                    init_values = torch.ones(input_dim, dtype=torch.float32)
+                else:
+                    raise ValueError(f"Invalid mask_init: {mask_init}")
+            # Clamp away from {0,1} to avoid infinite logits.
+            logits = torch.logit(init_values.clamp(1e-4, 1.0 - 1e-4))
+        self.mask_logits = nn.Parameter(logits, requires_grad=mask_learnable)
+        self.projector = MLP(input_dim, hidden_dim, output_dim, n_layers=n_layers, activation=activation, T=T)
+
+    def get_feature_mask(self):
+        """
+        Return a feature mask sampled from Bernoulli(sigmoid(logits))
+        using a straight-through estimator so gradients flow through the underlying probabilities.
+
+        Originally a sigmoid-only mask (deterministic soft gate), change to a Bernoulli-sampled mask (stochastic binary gate).
+        """
+        probs = torch.sigmoid(self.mask_logits)
+
+        # Hard binary sample
+        hard = torch.bernoulli(probs)
+        # Straight-through estimator: in forward use hard, in backward use probs.
+        return hard + (probs - probs.detach())
+
+    def forward(self, x):
+        # Match mask dtype/device to input and broadcast across batch/time.
+        mask = self.get_feature_mask().to(dtype=x.dtype, device=x.device)
+        if x.ndim == 3:
+            # x: (batch, time, features)
+            x_masked = x * mask.view(1, 1, -1)
+        elif x.ndim == 2:
+            # x: (batch, features)
+            x_masked = x * mask.view(1, -1)
+        else:
+            raise ValueError(f"Expected x.ndim in {{2,3}}, got {x.ndim}")
+
+        # Project masked features into the latent/output space.
+        return self.projector(x_masked)
+
+
 class Zeros(nn.Module):
     def __init__(self, device="cuda:0"):
         super(Zeros, self).__init__()
@@ -346,6 +665,41 @@ def _conv_spatial_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **k
     )
 
 
+def _conv_particle_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 0)
+    activation = kwargs.get("activation", "relu")
+    kernel_size_particles = kwargs.get("conv_kernel_size", 5)
+    stride_particles = kwargs.get("conv_stride", 1)
+    padding_particles = kwargs.get("conv_padding", 2)
+    kernel_size_coords = kwargs.get("conv_coord_kernel_size", 2)
+    return ConvSpatialParticle2DEncoder(
+        input_dim,
+        hidden_dim,
+        output_dim,
+        n_layers=n_layers,
+        activation=activation,
+        T=T,
+        kernel_size_particles=kernel_size_particles,
+        stride_particles=stride_particles,
+        padding_particles=padding_particles,
+        kernel_size_coords=kernel_size_coords,
+    )
+
+
+def _conv_physical_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    return ConvPhysicalEncoder(
+        input_dim, hidden_dim, output_dim,
+        n_layers=kwargs.get("n_layers", 0),
+        activation=kwargs.get("activation", "relu"),
+        T=T,
+        grid_size=kwargs.get("grid_size", 20),
+        spatial_bounds=kwargs.get("spatial_bounds", 3.0),
+        kernel_size=kwargs.get("conv_kernel_size", 3),
+        stride=kwargs.get("conv_stride", 1),
+        padding=kwargs.get("conv_padding", 1),
+    )
+
+
 def _conv_spatiotemporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
     n_layers = kwargs.get("n_layers", 0)
     activation = kwargs.get("activation", "relu")
@@ -381,19 +735,41 @@ def _conv_temporal_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **
     )
 
 
+def _mask_mlp_encoder_factory(input_dim, hidden_dim, output_dim, T=None, **kwargs):
+    n_layers = kwargs.get("n_layers", 1)
+    activation = kwargs.get("activation", "relu")
+    return FeatureMaskMLPEncoder(
+        input_dim,
+        hidden_dim,
+        output_dim,
+        n_layers=n_layers,
+        activation=activation,
+        T=T,
+        mask_learnable=kwargs.get("mask_learnable", True),
+        mask_init=kwargs.get("mask_init", "ones"),
+        mask_init_values=kwargs.get("mask_init_values", None),
+    )
+
+
 # Registry of encoder factories. Use encoder_type in encoder_params when building CPIC, e.g.:
 #   encoder_params = {"encoder_type": "mlp"}
 #   encoder_params = {"encoder_type": "mlp2"}
 #   encoder_params = {"encoder_type": "conv_spatial", "conv_kernel_size": 3}
+#   encoder_params = {"encoder_type": "conv_particle", "conv_kernel_size": 5}
+#   encoder_params = {"encoder_type": "conv_physical", "grid_size": 20, "spatial_bounds": 3.0}
 #   encoder_params = {"encoder_type": "conv_spatiotemporal", "kernel_size_feat": 3, "kernel_size_time": 3}
 #   encoder_params = {"encoder_type": "conv_temporal", "kernel_size": 3}
+#   encoder_params = {"encoder_type": "mask_mlp", "mask_learnable": True, "mask_init": "ones", "mask_init_values": None}
 ENCODERS = {
     "linear": _linear_encoder_factory,
     "mlp": _mlp_encoder_factory,
     "mlp2": _mlp_x2_encoder_factory,
     "conv_spatial": _conv_spatial_encoder_factory,
+    "conv_particle": _conv_particle_encoder_factory,
+    "conv_physical": _conv_physical_encoder_factory,
     "conv_spatiotemporal": _conv_spatiotemporal_encoder_factory,
     "conv_temporal": _conv_temporal_encoder_factory,
+    "mask_mlp": _mask_mlp_encoder_factory,
 }
 
 ENCODER_INPUT_SHAPE = {
@@ -401,8 +777,11 @@ ENCODER_INPUT_SHAPE = {
     "mlp": "flat",
     "mlp2": "flat",
     "conv_spatial": "conv",
+    "conv_particle": "flat",
+    "conv_physical": "flat",
     "conv_spatiotemporal": "conv",
     "conv_temporal": "conv",
+    "mask_mlp": "flat",
 }
 
 
@@ -553,6 +932,12 @@ class StructuredEncoder(nn.Module):
         if hasattr(self._mean, "get_filters"):
             return self._mean.get_filters(layer_idx=layer_idx)
         raise NotImplementedError(f"get_filters is not implemented for encoder type {self.encoder_type!r}")
+
+    def get_feature_mask(self):
+        """Return the feature mask for mask-capable mean encoders."""
+        if hasattr(self._mean, "get_feature_mask"):
+            return self._mean.get_feature_mask()
+        raise NotImplementedError(f"get_feature_mask is not implemented for encoder type {self.encoder_type!r}")
 
     def reshape_for_conv(self, x):
         # takes in x as (batch, time, features) or (batch, features)
