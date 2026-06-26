@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -82,7 +84,7 @@ def plot_filter_heatmap_panels(
 
 
 # ---------------------------------------------------------------------------
-# ConvPhysicalEncoder: 2D filter heatmaps and orbit vector field overlay
+# ConvPhysicalEncoder: 2D filter heatmaps and trajectory path overlay
 # ---------------------------------------------------------------------------
 
 def plot_physical_filter_heatmaps(
@@ -149,7 +151,7 @@ def plot_physical_filter_heatmaps(
     return fig, axes
 
 
-def compute_orbit_in_grid_coords(
+def compute_trajectory_in_grid_coords(
     positions: np.ndarray,
     particle_labels: np.ndarray,
     particle_order: np.ndarray,
@@ -183,7 +185,7 @@ def compute_orbit_in_grid_coords(
 
     Returns
     -------
-    orbit_grid : np.ndarray, shape (t_max, 2)
+    trajectory_grid : np.ndarray, shape (t_max, 2)
         Blob centroid path in grid coordinates [0, grid_size].
     """
     t_max, N, _ = positions.shape
@@ -207,23 +209,23 @@ def compute_orbit_in_grid_coords(
 
     # Map standardized coords to grid coords [0, grid_size]
     scale = grid_size / (2.0 * spatial_bounds)
-    orbit_grid = (centroid_std + spatial_bounds) * scale
-    orbit_grid = np.clip(orbit_grid, 0.0, grid_size - 1)
-    return orbit_grid
+    trajectory_grid = (centroid_std + spatial_bounds) * scale
+    trajectory_grid = np.clip(trajectory_grid, 0.0, grid_size - 1)
+    return trajectory_grid
 
 
 def compute_tangential_arrows(
-    orbit_grid: np.ndarray,
+    trajectory_grid: np.ndarray,
     n_arrows: int = 12,
     arrow_length: float = 0.8,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Sample evenly-spaced tangential velocity arrows along the orbit path.
+    Sample evenly-spaced tangential velocity arrows along the trajectory path.
 
     Parameters
     ----------
-    orbit_grid : np.ndarray, shape (t_max, 2)
-        Orbit path in grid coordinates.
+    trajectory_grid : np.ndarray, shape (t_max, 2)
+        Trajectory path in grid coordinates.
     n_arrows : int
         Number of arrows to place.
     arrow_length : float
@@ -234,33 +236,33 @@ def compute_tangential_arrows(
     positions : np.ndarray, shape (n_arrows, 2) — arrow base positions
     directions : np.ndarray, shape (n_arrows, 2) — unit tangent vectors scaled to arrow_length
     """
-    t_max = len(orbit_grid)
+    t_max = len(trajectory_grid)
     indices = np.linspace(0, t_max - 1, n_arrows, dtype=int)
-    positions = orbit_grid[indices]
+    positions = trajectory_grid[indices]
 
     # Central-difference tangent; wrap around endpoints
     prev_idx = np.clip(indices - 1, 0, t_max - 1)
     next_idx = np.clip(indices + 1, 0, t_max - 1)
-    tangents = orbit_grid[next_idx] - orbit_grid[prev_idx]
+    tangents = trajectory_grid[next_idx] - trajectory_grid[prev_idx]
     norms = np.linalg.norm(tangents, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     directions = (tangents / norms) * arrow_length
     return positions, directions
 
 
-def overlay_orbit_on_ax(
+def overlay_trajectory_on_ax(
     ax,
-    orbit_grid: np.ndarray,
+    trajectory_grid: np.ndarray,
     arrows: tuple[np.ndarray, np.ndarray] | None = None,
-    orbit_color: str = "lime",
+    trajectory_color: str = "lime",
     arrow_color: str = "white",
 ) -> None:
     """
-    Draw the blob orbit path and optional tangential arrows onto an existing axis.
+    Draw the blob trajectory path and optional tangential arrows onto an existing axis.
 
     Coordinates must already be in the same units as the axis (grid cells).
     """
-    ax.plot(orbit_grid[:, 0], orbit_grid[:, 1], color=orbit_color, linewidth=1.0, alpha=0.85, zorder=5)
+    ax.plot(trajectory_grid[:, 0], trajectory_grid[:, 1], color=trajectory_color, linewidth=1.0, alpha=0.85, zorder=5)
     if arrows is not None:
         pos, dirs = arrows
         ax.quiver(
@@ -306,22 +308,55 @@ def compute_avg_density_grid(
     return density
 
 
-def plot_orbit_density_map(
+# -----------------------------------------------------------------------------
+# Trajectory-filter alignment metric (used by the notebook interpretability analysis)
+# -----------------------------------------------------------------------------
+
+def trajectory_filter_alignment(weights, trajectory_grid, avg_density, grid_size):
+    """
+    Per-filter trajectory selectivity: fraction of the filter's response on the density
+    map that lands on the trajectory path.
+
+    Applies each |filter| as a spatial detector via conv2d on avg_density, then measures
+    how much of the resulting response map overlaps the trajectory path mask. NOTE: this
+    metric only measures response *overlap* with the path — it is structurally blind to
+    filter *shape* (an isotropic blob overlaps a circle and an ellipse about equally).
+    """
+    traj_mask = np.zeros((grid_size, grid_size), dtype=np.float32)
+    oi = np.clip(trajectory_grid[:, 1].astype(int), 0, grid_size - 1)
+    oj = np.clip(trajectory_grid[:, 0].astype(int), 0, grid_size - 1)
+    traj_mask[oi, oj] = 1.0
+    traj_mask_norm = traj_mask / (traj_mask.sum() + 1e-8)
+
+    K = weights.shape[2]
+    pad = K // 2
+    density_t = torch.from_numpy(avg_density).float().unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+
+    scores = []
+    for c in range(weights.shape[0]):
+        kernel = torch.from_numpy(np.abs(weights[c:c + 1])).float()  # (1,1,K,K)
+        response = F.conv2d(density_t, kernel, padding=pad).squeeze().numpy()  # (H,W)
+        response_norm = response / (response.sum() + 1e-8)
+        scores.append(float(np.sum(response_norm * traj_mask_norm)))
+    return np.array(scores)
+
+
+def plot_trajectory_density_map(
     avg_density: np.ndarray,
-    orbit_grid: np.ndarray,
+    trajectory_grid: np.ndarray,
     arrows: tuple[np.ndarray, np.ndarray] | None = None,
     spatial_bounds: float = 3.0,
     suptitle: str | None = None,
 ) -> tuple:
     """
-    Plot average particle density with the blob orbit path and velocity arrows overlaid.
+    Plot average particle density with the blob trajectory path and velocity arrows overlaid.
 
     Parameters
     ----------
     avg_density : np.ndarray, shape (grid_size, grid_size)
         Mean particle count per cell.
-    orbit_grid : np.ndarray, shape (t_max, 2)
-        Orbit path in grid coordinates.
+    trajectory_grid : np.ndarray, shape (t_max, 2)
+        Trajectory path in grid coordinates.
     arrows : tuple, optional
         (positions, directions) from compute_tangential_arrows.
     spatial_bounds : float
@@ -338,7 +373,7 @@ def plot_orbit_density_map(
                    extent=[0, grid_size, 0, grid_size])
     fig.colorbar(im, ax=ax, shrink=0.8, label="mean particle count")
 
-    overlay_orbit_on_ax(ax, orbit_grid, arrows=arrows)
+    overlay_trajectory_on_ax(ax, trajectory_grid, arrows=arrows)
 
     tick_positions = np.linspace(0, grid_size, 5)
     tick_labels = [f"{v:.1f}" for v in np.linspace(-spatial_bounds, spatial_bounds, 5)]
@@ -363,19 +398,19 @@ def save_encoder_filter_artifacts(
     encoder_type: str,
     encoder_label: str,
     layer_idx: int = 0,
-    orbit_grid: np.ndarray | None = None,
+    trajectory_grid: np.ndarray | None = None,
     avg_density: np.ndarray | None = None,
 ) -> dict[str, str]:
     """
     Save learned conv filter weights and visualization PNGs for a sweep run.
 
-    For ``conv_physical``, writes 2D filter heatmaps and an optional orbit+density
+    For ``conv_physical``, writes 2D filter heatmaps and an optional trajectory+density
     overlay. For other conv encoders, writes panel magnitude heatmaps.
 
     Returns
     -------
     dict
-        Keys: ``filter_weights_path``, ``filter_plot_path``, ``filter_orbit_density_path``
+        Keys: ``filter_weights_path``, ``filter_plot_path``, ``filter_trajectory_density_path``
         (empty when not applicable), ``filter_meta_path``.
     """
     out_dir = Path(out_dir)
@@ -384,7 +419,7 @@ def save_encoder_filter_artifacts(
     npy_path = out_dir / f"{stem}.npy"
     png_path = out_dir / f"{stem}.png"
     meta_path = out_dir / f"{stem}.json"
-    orbit_density_path = ""
+    trajectory_density_path = ""
 
     np.save(npy_path, weights)
 
@@ -394,19 +429,19 @@ def save_encoder_filter_artifacts(
         fig.savefig(png_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-        if orbit_grid is not None and avg_density is not None:
-            orbit_density_path = str(out_dir / f"{stem}_orbit_density.png")
-            arrows = compute_tangential_arrows(orbit_grid)
-            fig2, _ = plot_orbit_density_map(
+        if trajectory_grid is not None and avg_density is not None:
+            trajectory_density_path = str(out_dir / f"{stem}_trajectory_density.png")
+            arrows = compute_tangential_arrows(trajectory_grid)
+            fig2, _ = plot_trajectory_density_map(
                 avg_density,
-                orbit_grid,
+                trajectory_grid,
                 arrows=arrows,
                 spatial_bounds=float(meta.get("spatial_bounds", 3.0)),
-                suptitle=f"{encoder_label} — orbit + density",
+                suptitle=f"{encoder_label} — trajectory + density",
             )
-            fig2.savefig(orbit_density_path, dpi=150, bbox_inches="tight")
+            fig2.savefig(trajectory_density_path, dpi=150, bbox_inches="tight")
             plt.close(fig2)
-            np.save(out_dir / f"{stem}_orbit_grid.npy", orbit_grid)
+            np.save(out_dir / f"{stem}_trajectory_grid.npy", trajectory_grid)
             np.save(out_dir / f"{stem}_avg_density.npy", avg_density)
     else:
         w_mag = filter_weights_to_panel_magnitudes(weights)
@@ -427,10 +462,10 @@ def save_encoder_filter_artifacts(
         "meta": meta,
         "filter_weights_path": str(npy_path),
         "filter_plot_path": str(png_path),
-        "filter_orbit_density_path": orbit_density_path,
+        "filter_trajectory_density_path": trajectory_density_path,
     }
-    if orbit_grid is not None:
-        payload["orbit_grid_path"] = str(out_dir / f"{stem}_orbit_grid.npy")
+    if trajectory_grid is not None:
+        payload["trajectory_grid_path"] = str(out_dir / f"{stem}_trajectory_grid.npy")
     if avg_density is not None:
         payload["avg_density_path"] = str(out_dir / f"{stem}_avg_density.npy")
 
@@ -464,9 +499,9 @@ def regenerate_physical_filter_plots(
         encoder_label = payload.get("encoder_label", encoder_label)
         layer_idx = int(payload.get("layer_idx", 0))
 
-    orbit_grid_path = out_dir / f"{stem}_orbit_grid.npy"
+    trajectory_grid_path = out_dir / f"{stem}_trajectory_grid.npy"
     avg_density_path = out_dir / f"{stem}_avg_density.npy"
-    orbit_grid = np.load(orbit_grid_path) if orbit_grid_path.exists() else None
+    trajectory_grid = np.load(trajectory_grid_path) if trajectory_grid_path.exists() else None
     avg_density = np.load(avg_density_path) if avg_density_path.exists() else None
 
     return save_encoder_filter_artifacts(
@@ -477,6 +512,6 @@ def regenerate_physical_filter_plots(
         encoder_type="conv_physical",
         encoder_label=encoder_label,
         layer_idx=layer_idx,
-        orbit_grid=orbit_grid,
+        trajectory_grid=trajectory_grid,
         avg_density=avg_density,
     )

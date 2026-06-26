@@ -558,7 +558,7 @@ class FeatureMaskMLPEncoder(nn.Module):
         MLP projection
     """
 
-    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, activation="relu", T=None, mask_learnable=True, mask_init="ones", mask_init_values=None):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, activation="relu", T=None, mask_learnable=True, mask_init="uniform", mask_init_values=None):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -578,6 +578,10 @@ class FeatureMaskMLPEncoder(nn.Module):
                 if mask_init == "pi":
                     # Fallback for pi mode when explicit scores are not provided.
                     init_values = torch.full((input_dim,), 0.5, dtype=torch.float32)
+                elif mask_init == "uniform":
+                    # Uniform: every gate starts at prob 0.5 (logit 0), so learning
+                    # moves each feature purely by gradient (no random head start).
+                    init_values = torch.full((input_dim,), 0.5, dtype=torch.float32)
                 elif mask_init == "ones":
                     init_values = torch.ones(input_dim, dtype=torch.float32)
                 else:
@@ -595,6 +599,13 @@ class FeatureMaskMLPEncoder(nn.Module):
         Originally a sigmoid-only mask (deterministic soft gate), change to a Bernoulli-sampled mask (stochastic binary gate).
         """
         probs = torch.sigmoid(self.mask_logits)
+
+        # At inference use a deterministic mask: sampling Bernoulli at eval time
+        # injects gate noise into the latents (heavy test-time dropout when gates
+        # sit near 0.5), which corrupts downstream probes. Threshold at 0.5 so a
+        # confident gate -> 1/0 and the encoder reduces to a plain masked MLP.
+        if not self.training:
+            return (probs > 0.5).to(probs.dtype)
 
         # Hard binary sample
         hard = torch.bernoulli(probs)

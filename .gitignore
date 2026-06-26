@@ -33,3 +33,6 @@ experiments/synthetic_lorenz_experiment/data/
 
 # video experiment results
 experiments/video_experiment/res/
+
+# personal/cluster-specific launcher scripts (SLURM, paths)
+experiments/particle_experiment/scripts/

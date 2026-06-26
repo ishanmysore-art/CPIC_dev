@@ -57,11 +57,12 @@ pip install "cpic[dca]"
   - CPIC experiments (M1, HC, Temp, MS): <code>real_data_experiment_standard.py</code>, <code>real_data_experiment_standard_beta.py</code>
   - Competitor baselines: <code>real_data_competitors.py</code>
   - Summaries/post-analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>
-- Particle orbit experiment: <code>experiments/particle_orbit_experiment/</code>
-  - Notebook workflow: <code>particle_orbit.ipynb</code>
-  - Data generation script: <code>generate_particle_orbit.py</code>
-  - Config-driven batch encoder sweep: <code>run_particle_orbit_experiment.py</code>
-  - Re-plot saved CSV results: <code>plot_particle_orbit_results.py</code>
+- Particle dynamics experiment: <code>experiments/particle_experiment/</code>
+  - Notebook workflow: <code>particle_dynamics.ipynb</code>
+  - Data generation script: <code>generate_particle_dynamics.py</code>
+  - Config-driven batch encoder sweep: <code>run_particle_experiment.py</code>
+  - Re-plot saved CSV results: <code>plot_particle_results.py</code>
+  - ConvPhysical interpretability analysis: <code>conv_physical_analysis.ipynb</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
   - Train then visualize with one matching <code>--seed</code> / <code>--signature</code>: <code>run_sparse_cpic_train_and_visualize.py</code> (see README, “Train and visualize in one step”)
@@ -74,9 +75,12 @@ CPIC supports multiple encoder architectures via <code>encoder_params["encoder_t
 - **Linear**: <code>{"encoder_type": "linear"}</code>
 - **MLP**: <code>{"encoder_type": "mlp", "n_layers": 1, "activation": "relu"}</code>
 - **2x MLP**: <code>{"encoder_type": "mlp2"}</code>
-- **Conv (spatial only)**: <code>{"encoder_type": "conv_spatial"}</code> or <code>"conv"</code>, with optional <code>n_layers</code>, <code>conv_kernel_size</code>, <code>conv_stride</code>, <code>conv_padding</code>
-- **Conv (spatiotemporal)**: <code>{"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3, "conv_stride": 1}</code>
-- **1D temporal Conv**: <code>{"encoder_type": "conv1d_temporal", "kernel_size_1d": 3, "n_layers": 1}</code>
+- **Conv (spatial)**: <code>{"encoder_type": "conv_spatial"}</code>, with optional <code>n_layers</code>, <code>conv_kernel_size</code>, <code>conv_stride</code>, <code>conv_padding</code> — 2D conv over the feature axis
+- **Conv (particle)**: <code>{"encoder_type": "conv_particle", "conv_kernel_size": 5}</code>, with optional <code>conv_stride</code>, <code>conv_padding</code>, <code>conv_coord_kernel_size</code>, <code>n_layers</code> — 2D conv over (particles x coords)
+- **Conv (physical / occupancy grid)**: <code>{"encoder_type": "conv_physical", "grid_size": 20, "spatial_bounds": 3.0}</code>, with optional <code>conv_kernel_size</code>, <code>conv_stride</code>, <code>conv_padding</code>, <code>n_layers</code> — bins particle positions into a spatial grid, then a shared Conv2d
+- **Conv (spatiotemporal)**: <code>{"encoder_type": "conv_spatiotemporal", "conv_kernel_size": 3, "conv_stride": 1}</code>, with optional <code>conv_padding</code>, <code>n_layers</code> — 2D conv over both feature and time axes
+- **1D temporal Conv**: <code>{"encoder_type": "conv_temporal", "kernel_size_1d": 3, "n_layers": 1}</code>
+- **Feature-mask MLP**: <code>{"encoder_type": "mask_mlp", "mask_learnable": true, "mask_init": "uniform"}</code>, with optional <code>mask_init_values</code>, <code>n_layers</code>, <code>activation</code> — per-feature Bernoulli straight-through gate before an MLP
 
 Pass <code>encoder_params</code> when constructing CPIC, and when calling <code>fit()</code> the encoder is built from the registry.
 
@@ -85,7 +89,7 @@ Experiment configurations are grouped under:
 - <code>experiments/synthetic_lorenz_experiment/config/</code>
 - <code>experiments/real_data_experiments/config/</code>
 - <code>experiments/video_experiment/config/</code>
-- <code>experiments/particle_orbit_experiment/config/</code>
+- <code>experiments/particle_experiment/config/</code>
 
 ## Figures
 Figures and generated outputs are stored inside each experiment folder, e.g.:

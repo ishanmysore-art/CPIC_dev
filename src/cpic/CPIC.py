@@ -291,7 +291,15 @@ class CPIC(nn.Module):
         X : torch.Tensor
             Input data tensor.
         """
-        encoded_mean = self.encoder.get_mean(X)
+        # Run the encoder deterministically: eval mode disables stochastic gates (e.g. the FeatureMaskMLP Bernoulli mask)
+        # so the returned latents are reproducible rather than randomly perturbed per call.
+        was_training = self.training
+        self.eval()
+        try:
+            encoded_mean = self.encoder.get_mean(X)
+        finally:
+            if was_training:
+                self.train()
         return encoded_mean
 
 
