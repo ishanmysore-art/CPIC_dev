@@ -575,12 +575,10 @@ class FeatureMaskMLPEncoder(nn.Module):
                     raise ValueError(f"mask_init_values must have length {input_dim}, got {init_values.numel()}")
                 init_values = init_values.clamp(0.0, 1.0)
             else:
-                if mask_init == "pi":
-                    # Fallback for pi mode when explicit scores are not provided.
-                    init_values = torch.full((input_dim,), 0.5, dtype=torch.float32)
-                elif mask_init == "uniform":
-                    # Uniform: every gate starts at prob 0.5 (logit 0), so learning
-                    # moves each feature purely by gradient (no random head start).
+                if mask_init in ("uniform", "pi"):
+                    # Every gate starts at prob 0.5 (logit 0), so learning moves each
+                    # feature purely by gradient (no random head start). "pi" falls back
+                    # to this when explicit PI scores are not provided.
                     init_values = torch.full((input_dim,), 0.5, dtype=torch.float32)
                 elif mask_init == "ones":
                     init_values = torch.ones(input_dim, dtype=torch.float32)
