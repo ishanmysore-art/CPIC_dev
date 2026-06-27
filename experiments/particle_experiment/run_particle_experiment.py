@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Batch particle-orbit experiment across encoder types and noise levels,
+Batch particle dynamics experiment across encoder types and noise levels,
 configured via INI files (similar workflow to synthetic/synthetic_experiment.py).
 
 Example
 -------
-python run_particle_orbit_experiment.py --config particle_orbit_cpic_conv
+python run_particle_experiment.py --config particle_circle
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from sklearn.metrics import r2_score
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC_PATH = ROOT / "src"
-DATA_GEN_PATH = ROOT / "experiments" / "particle_orbit_experiment"
+DATA_GEN_PATH = ROOT / "experiments" / "particle_experiment"
 for folder in (SRC_PATH, DATA_GEN_PATH):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
@@ -35,14 +35,18 @@ from cpic import CPIC
 from cpic.utils.data import PastFutureDataset
 from filter_visualization import (
     save_encoder_filter_artifacts,
-    compute_orbit_in_grid_coords,
+    compute_trajectory_in_grid_coords,
     compute_avg_density_grid,
 )
-from generate_particle_orbit import generate_particle_orbit_process_timeseries # type: ignore[reportMissingImports]
+from generate_particle_dynamics import generate_particle_process_timeseries  # type: ignore[reportMissingImports]
 
 
+_CONFIG_DIR = Path(__file__).resolve().parent / "config"
 config_file_dict = {
-    "particle_orbit_cpic_conv": str(Path(__file__).resolve().parent / "config" / "config_particle_orbit_cpic_conv.ini"),
+    "particle_all_circle": str(_CONFIG_DIR / "config_particle_all_circle.ini"),
+    "particle_circle": str(_CONFIG_DIR / "config_particle_circle.ini"),
+    "particle_ellipse": str(_CONFIG_DIR / "config_particle_ellipse.ini"),
+    "particle_beta_sweep": str(_CONFIG_DIR / "config_particle_beta_sweep.ini"),
 }
 
 
@@ -65,6 +69,11 @@ def parse_int_list(text: str) -> list[int]:
     if not vals:
         raise ValueError("Expected a non-empty integer list")
     return [int(v) for v in vals]
+
+
+def parse_float_list(text: str) -> list[float]:
+    """Parse a comma-separated float list from config text (empty -> [])."""
+    return [float(x.strip()) for x in text.split(",") if x.strip()]
 
 
 def bool_or_default(cfg: ConfigParser, section: str, key: str, default: bool) -> bool:
@@ -146,6 +155,28 @@ def load_encoder_specs(cfg: ConfigParser) -> list[EncoderSpec]:
         specs.append(EncoderSpec("ConvPhysical (L)", conv_phys, "latent"))
         specs.append(EncoderSpec("ConvPhysical (O)", conv_phys, "observation"))
 
+    if bool_or_default(cfg, "Sweep", "include_mask_uniform_static", False):
+        mask_uniform = {
+            **base,
+            "encoder_type": "mask_mlp",
+            "mask_learnable": False,
+            "mask_init": "uniform",
+            "mask_strategy": "uniform_static",
+        }
+        specs.append(EncoderSpec("MaskUniformStatic (L)", mask_uniform, "latent"))
+        specs.append(EncoderSpec("MaskUniformStatic (O)", mask_uniform, "observation"))
+
+    if bool_or_default(cfg, "Sweep", "include_mask_uniform_learned", False):
+        mask_uniform_learned = {
+            **base,
+            "encoder_type": "mask_mlp",
+            "mask_learnable": True,
+            "mask_init": "uniform",
+            "mask_strategy": "uniform_init_learned",
+        }
+        specs.append(EncoderSpec("MaskUniformLearned (L)", mask_uniform_learned, "latent"))
+        specs.append(EncoderSpec("MaskUniformLearned (O)", mask_uniform_learned, "observation"))
+
     if bool_or_default(cfg, "Sweep", "include_mask_random", False):
         mask_random = {
             **base,
@@ -156,6 +187,17 @@ def load_encoder_specs(cfg: ConfigParser) -> list[EncoderSpec]:
         }
         specs.append(EncoderSpec("MaskRandom (L)", mask_random, "latent"))
         specs.append(EncoderSpec("MaskRandom (O)", mask_random, "observation"))
+
+    if bool_or_default(cfg, "Sweep", "include_mask_random_learned", False):
+        mask_random_learned = {
+            **base,
+            "encoder_type": "mask_mlp",
+            "mask_learnable": True,
+            "mask_init": "random",
+            "mask_strategy": "random_init_learned",
+        }
+        specs.append(EncoderSpec("MaskRandomLearned (L)", mask_random_learned, "latent"))
+        specs.append(EncoderSpec("MaskRandomLearned (O)", mask_random_learned, "observation"))
 
     if bool_or_default(cfg, "Sweep", "include_mask_pi_static", False):
         mask_pi_static = {
@@ -313,6 +355,42 @@ def get_final_mask_stats(model: CPIC, threshold: float) -> tuple[float, str]:
     return active_frac, ",".join(map(str, active.tolist()))
 
 
+def get_mask_probs(model: CPIC) -> np.ndarray | None:
+    """Return the deterministic per-feature gate probabilities sigmoid(logits)."""
+    if getattr(model.encoder, "encoder_type", None) != "mask_mlp":
+        return None
+    logits = getattr(getattr(model.encoder, "_mean", None), "mask_logits", None)
+    if logits is None:
+        return None
+    return torch.sigmoid(logits).detach().cpu().numpy()
+
+
+def get_blob_selection_stats(
+    model: CPIC,
+    particle_labels: np.ndarray,
+    particle_order: np.ndarray,
+    threshold: float,
+) -> tuple[float, float]:
+    """Fraction of features kept and fraction of *kept* features that are blob.
+
+    Uses deterministic gate probabilities (sigmoid of the learnable logits),
+    matching the notebook's discovery metric. ``blob_sel_rate`` is the precision
+    of the learned mask: of the features it keeps, how many belong to the
+    coherent blob (the interpretability signal of interest).
+    """
+    probs = get_mask_probs(model)
+    if probs is None:
+        return float("nan"), float("nan")
+    active_idx = np.where(probs >= threshold)[0]
+    active_frac = float(active_idx.size / probs.size)
+    if active_idx.size == 0:
+        return active_frac, 0.0
+    # Data features are interleaved (x, y) per particle, ordered by particle_order.
+    feat_labels = np.repeat(particle_labels[particle_order], 2)
+    blob_sel_rate = float(np.mean(feat_labels[active_idx] == 1))
+    return active_frac, blob_sel_rate
+
+
 def save_conv_filter_artifacts(
     model: CPIC,
     out_dir: Path,
@@ -321,14 +399,14 @@ def save_conv_filter_artifacts(
     num_noise: int,
     encoder_label: str,
     layer_idx: int,
-    orbit_grid: np.ndarray | None = None,
+    trajectory_grid: np.ndarray | None = None,
     avg_density: np.ndarray | None = None,
 ) -> dict[str, str]:
     """Save convolution filter weights and heatmap summaries (physical or panel style)."""
     empty = {
         "filter_weights_path": "",
         "filter_plot_path": "",
-        "filter_orbit_density_path": "",
+        "filter_trajectory_density_path": "",
         "filter_meta_path": "",
     }
     if not hasattr(model.encoder, "get_filters"):
@@ -352,7 +430,7 @@ def save_conv_filter_artifacts(
         encoder_type=enc_type,
         encoder_label=encoder_label,
         layer_idx=layer_idx,
-        orbit_grid=orbit_grid if enc_type == "conv_physical" else None,
+        trajectory_grid=trajectory_grid if enc_type == "conv_physical" else None,
         avg_density=avg_density if enc_type == "conv_physical" else None,
     )
     return paths
@@ -366,13 +444,24 @@ def build_past_windows_and_gt(
     device: str,
     t_min: int,
     t_max: int,
+    encode_chunk_size: int = 256,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Encode sliding past windows and align corresponding latent targets."""
+    """Encode sliding past windows and align corresponding latent targets.
+
+    The encode is chunked so peak memory scales with ``encode_chunk_size``, not
+    the number of windows. This matters for grid-expanding encoders like
+    ConvPhysical, where a single forward over all (hundreds/thousands of)
+    windows would OOM regardless of the training batch size.
+    """
     end_times = np.arange(t_min, t_max)
     past_windows = np.stack([data[t - window_size : t] for t in end_times], axis=0)
+    z_chunks = []
     with torch.no_grad():
-        encoded = model.encode(torch.from_numpy(past_windows).float().to(device))
-        z = encoded[:, -1, :].cpu().numpy()
+        for start in range(0, past_windows.shape[0], encode_chunk_size):
+            chunk = past_windows[start : start + encode_chunk_size]
+            encoded = model.encode(torch.from_numpy(chunk).float().to(device))
+            z_chunks.append(encoded[:, -1, :].cpu().numpy())
+    z = np.concatenate(z_chunks, axis=0)
     gt = gt_latent[end_times - 1]
     return z, gt
 
@@ -398,9 +487,13 @@ def run_condition(
     T: int,
     num_blob: int,
     orbit_radius: float,
+    trajectory: str,
+    semi_major: float | None,
+    semi_minor: float | None,
     omega: float,
     sigma_blob: float,
     noise_ar_coeff: float,
+    centroid_ar_coeff: float,
     spatial_bounds: float,
     hidden_dim: int,
     beta: float,
@@ -428,14 +521,18 @@ def run_condition(
     torch.manual_seed(seed)
 
     (data, gt_latent, particle_order, particle_labels,
-     standardization_mean, standardization_std, positions) = generate_particle_orbit_process_timeseries(
+     standardization_mean, standardization_std, positions) = generate_particle_process_timeseries(
         t_max=t_max,
         num_blob=num_blob,
         num_noise=num_noise,
+        trajectory=trajectory,
         orbit_radius=orbit_radius,
+        semi_major=semi_major,
+        semi_minor=semi_minor,
         omega=omega,
         sigma_blob=sigma_blob,
         noise_ar_coeff=noise_ar_coeff,
+        centroid_ar_coeff=centroid_ar_coeff,
         spatial_bounds=spatial_bounds,
         seed=seed,
     )
@@ -503,10 +600,21 @@ def run_condition(
                 writer=writer,
             )
 
-            z_train, gt_train = build_past_windows_and_gt(data, gt_latent, T, model, device, t_min=T, t_max=t_split)
-            z_test, gt_test = build_past_windows_and_gt(data, gt_latent, T, model, device, t_min=t_split, t_max=t_max)
+            z_train, gt_train = build_past_windows_and_gt(
+                data, gt_latent, T, model, device, t_min=T, t_max=t_split,
+                encode_chunk_size=curr_batch_size,
+            )
+            z_test, gt_test = build_past_windows_and_gt(
+                data, gt_latent, T, model, device, t_min=t_split, t_max=t_max,
+                encode_chunk_size=curr_batch_size,
+            )
             metrics = heldout_probe_r2(z_train, gt_train, z_test, gt_test)
             used_batch_size = curr_batch_size
+            # A later attempt succeeding must clear any oom_failed status left
+            # by earlier (larger-batch) attempts; status is otherwise sticky.
+            status = "success"
+            error_type = ""
+            error_message = ""
             break
         except RuntimeError as exc:
             if not is_oom_error(exc):
@@ -537,22 +645,26 @@ def run_condition(
 
     mask_active_frac = float("nan")
     mask_active_indices = ""
+    blob_sel_rate = float("nan")
     if model is not None and status == "success":
         mask_active_frac, mask_active_indices = get_final_mask_stats(model, mask_eval_threshold)
+        _, blob_sel_rate = get_blob_selection_stats(
+            model, particle_labels, particle_order, mask_eval_threshold
+        )
 
     filter_weights_path = ""
     filter_plot_path = ""
-    filter_orbit_density_path = ""
+    filter_trajectory_density_path = ""
     filter_meta_path = ""
     if model is not None and status == "success" and save_filter_viz:
-        orbit_grid = None
+        trajectory_grid = None
         avg_density = None
         if getattr(model.encoder, "encoder_type", "") == "conv_physical":
             try:
                 _, phys_meta = model.encoder.get_filters(layer_idx=filter_layer_idx)
                 grid_size = phys_meta["grid_size"]
                 enc_spatial_bounds = phys_meta["spatial_bounds"]
-                orbit_grid = compute_orbit_in_grid_coords(
+                trajectory_grid = compute_trajectory_in_grid_coords(
                     positions, particle_labels, particle_order,
                     standardization_mean, standardization_std,
                     grid_size=grid_size,
@@ -562,7 +674,7 @@ def run_condition(
                     data[:t_split], grid_size=grid_size, spatial_bounds=enc_spatial_bounds,
                 )
             except Exception as exc:
-                print(f"[WARN] Could not compute orbit/density for conv_physical: {exc}")
+                print(f"[WARN] Could not compute trajectory/density for conv_physical: {exc}")
 
         filter_paths = save_conv_filter_artifacts(
             model,
@@ -571,12 +683,12 @@ def run_condition(
             num_noise=num_noise,
             encoder_label=encoder_spec.label,
             layer_idx=filter_layer_idx,
-            orbit_grid=orbit_grid,
+            trajectory_grid=trajectory_grid,
             avg_density=avg_density,
         )
         filter_weights_path = filter_paths.get("filter_weights_path", "")
         filter_plot_path = filter_paths.get("filter_plot_path", "")
-        filter_orbit_density_path = filter_paths.get("filter_orbit_density_path", "")
+        filter_trajectory_density_path = filter_paths.get("filter_trajectory_density_path", "")
         filter_meta_path = filter_paths.get("filter_meta_path", "")
 
     if model is not None:
@@ -586,8 +698,11 @@ def run_condition(
     return {
         "seed": seed,
         "num_noise": num_noise,
+        "beta": beta,
+        "trajectory": trajectory,
         "sigma_noise": sigma_noise,
         "noise_ar_coeff": noise_ar_coeff,
+        "centroid_ar_coeff": centroid_ar_coeff,
         "encoder_label": encoder_spec.label,
         "predictive_space": encoder_spec.predictive_space,
         "status": status,
@@ -597,12 +712,13 @@ def run_condition(
         "used_batch_size": used_batch_size,
         "mask_active_frac": mask_active_frac,
         "mask_active_indices": mask_active_indices,
+        "blob_sel_rate": blob_sel_rate,
         "pi_mean_score": float(np.mean(pi_scores)),
         "pi_max_lag": int(pi_max_lag),
         "pi_lag_agg": pi_lag_agg,
         "filter_weights_path": filter_weights_path,
         "filter_plot_path": filter_plot_path,
-        "filter_orbit_density_path": filter_orbit_density_path,
+        "filter_trajectory_density_path": filter_trajectory_density_path,
         "filter_meta_path": filter_meta_path,
         "tensorboard_log_dir": tensorboard_log_dir,
         **metrics,
@@ -629,6 +745,30 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
         .sort_values(["encoder_label", "num_noise"])
     )
 
+    # Shared styling from the canonical plotter (single source of truth):
+    # color per encoder family, dotted/hollow latent vs solid/filled observation.
+    from matplotlib.lines import Line2D
+
+    from plot_particle_results import (
+        _base_family_from_label,
+        _color_for_label,
+        _line_style_for_label,
+        _marker_facecolor_for_label,
+    )
+
+    # tab10 fallback for any family not in the canonical color map.
+    _fallback: dict[str, tuple] = {}
+    cmap = plt.get_cmap("tab10")
+
+    def resolve_color(label: str):
+        c = _color_for_label(label)
+        if c is not None:
+            return c
+        fam = _base_family_from_label(label)
+        if fam not in _fallback:
+            _fallback[fam] = cmap(len(_fallback) % 10)
+        return _fallback[fam]
+
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     ax = axes[0]
 
@@ -636,13 +776,27 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
         x = sub["num_noise"].to_numpy(dtype=float)
         y = sub["mean"].to_numpy(dtype=float)
         yerr = sub["std"].fillna(0.0).to_numpy(dtype=float)
-        ax.errorbar(x, y, yerr=yerr, fmt='-o', linewidth=2, markersize=5, capsize=3, elinewidth=1.2, label=label)
+        c = resolve_color(label)
+        ax.errorbar(x, y, yerr=yerr, fmt="o", linestyle=_line_style_for_label(label),
+                    color=c, markerfacecolor=_marker_facecolor_for_label(label, c),
+                    markeredgecolor=c, linewidth=2, markersize=6,
+                    capsize=3, elinewidth=1.2, label=label)
+
+    # Explicit proxies so the legend reflects line style / marker fill.
+    legend_handles = []
+    for lbl in sorted(agg["encoder_label"].unique()):
+        c = resolve_color(lbl)
+        legend_handles.append(
+            Line2D([0], [0], color=c, linestyle=_line_style_for_label(lbl), marker="o",
+                   markersize=6, linewidth=2, markerfacecolor=_marker_facecolor_for_label(lbl, c),
+                   markeredgecolor=c, label=lbl)
+        )
 
     ax.set_xlabel("Number of noise particles", fontsize=14)
-    ax.set_ylabel(r"Held-out linear probe $R^2$ (mean over x,y)", fontsize=14)
+    ax.set_ylabel(r"Test linear-probe $R^2$ (mean over x,y)", fontsize=14)
     ax.axhline(0.0, color="black", linewidth=0.6, linestyle="--")
     ax.tick_params(axis="both", labelsize=12)
-    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+    ax.legend(handles=legend_handles, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
     ax.set_title(r"$R^2$ vs noise particles", fontsize=14)
 
     ax2 = axes[1]
@@ -655,13 +809,18 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
                 .sort_values(["encoder_label", "num_noise"])
             )
             for label, sub in mask_agg.groupby("encoder_label"):
+                c = resolve_color(label)
                 ax2.errorbar(
                     sub["num_noise"].to_numpy(dtype=float),
                     sub["mean"].to_numpy(dtype=float),
                     yerr=sub["std"].fillna(0.0).to_numpy(dtype=float),
-                    fmt="-o",
+                    fmt="o",
+                    linestyle=_line_style_for_label(label),
+                    color=c,
+                    markerfacecolor=_marker_facecolor_for_label(label, c),
+                    markeredgecolor=c,
                     linewidth=2,
-                    markersize=5,
+                    markersize=6,
                     capsize=3,
                     label=label,
                 )
@@ -679,8 +838,8 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Batch particle-orbit encoder sweep using config files.")
-    parser.add_argument("--config", type=str, default="particle_orbit_cpic_conv")
+    parser = argparse.ArgumentParser(description="Batch particle dynamics encoder sweep using config files.")
+    parser.add_argument("--config", type=str, default="particle_circle")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--signature", type=str, default=None)
     args = parser.parse_args()
@@ -708,19 +867,37 @@ if __name__ == "__main__":
     T = cfg.getint("Data", "T")
     num_blob = cfg.getint("Data", "num_blob")
     orbit_radius = cfg.getfloat("Data", "orbit_radius")
+    trajectory = cfg.get("Data", "trajectory", fallback="circle").strip()
+    _semi_major_str = cfg.get("Data", "semi_major", fallback="").strip()
+    _semi_minor_str = cfg.get("Data", "semi_minor", fallback="").strip()
+    semi_major = float(_semi_major_str) if _semi_major_str else None
+    semi_minor = float(_semi_minor_str) if _semi_minor_str else None
     omega = cfg.getfloat("Data", "omega")
     sigma_blob = cfg.getfloat("Data", "sigma_blob")
     noise_ar_coeff = float_or_default(cfg, "Data", "noise_ar_coeff", 0.8)
+    centroid_ar_coeff = float_or_default(cfg, "Data", "centroid_ar_coeff", 0.95)
     spatial_bounds = cfg.getfloat("Data", "spatial_bounds")
 
     hidden_dim = cfg.getint("Model", "hidden_dim")
     beta = cfg.getfloat("Model", "beta")
     critic = cfg.get("Model", "critic", fallback="concat")
 
+    # Optional beta sweep: if [Sweep] betas is set, loop over those values as the
+    # outermost dimension (the "interpretability knob" experiment). Otherwise use
+    # the single [Model] beta. Each row records its own beta.
+    betas = parse_float_list(cfg.get("Sweep", "betas", fallback=""))
+    if not betas:
+        betas = [beta]
+
     epochs = cfg.getint("Training", "epochs")
     batch_size = cfg.getint("Training", "batch_size")
     lr = cfg.getfloat("Training", "lr")
     early_stop = cfg.getint("Training", "early_stop")
+    # Conv encoders are the runtime bottleneck and converge in far fewer epochs
+    # than the MaskMLP discovery recipe needs. Allow a separate (smaller) budget
+    # for conv_* specs; fall back to the global value when not set.
+    conv_epochs = int_or_default(cfg, "Training", "conv_epochs", epochs)
+    conv_early_stop = int_or_default(cfg, "Training", "conv_early_stop", early_stop)
     oom_retry_enabled = bool_or_default(cfg, "OOM", "oom_retry_enabled", True)
     oom_batch_size_fallbacks = parse_int_list(
         cfg.get("OOM", "oom_batch_size_fallbacks", fallback=str(batch_size))
@@ -751,49 +928,62 @@ if __name__ == "__main__":
         tensorboard_root_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict] = []
-    for seed in seeds:
-        for num_noise in num_noise_values:
-            for spec in specs:
-                row = run_condition(
-                    seed=seed,
-                    num_noise=num_noise,
-                    encoder_spec=spec,
-                    t_max=t_max,
-                    train_ratio=train_ratio,
-                    T=T,
-                    num_blob=num_blob,
-                    orbit_radius=orbit_radius,
-                    omega=omega,
-                    sigma_blob=sigma_blob,
-                    noise_ar_coeff=noise_ar_coeff,
-                    spatial_bounds=spatial_bounds,
-                    hidden_dim=hidden_dim,
-                    beta=beta,
-                    critic=critic,
-                    epochs=epochs,
-                    batch_size=batch_size,
-                    oom_retry_enabled=oom_retry_enabled,
-                    oom_batch_size_fallbacks=oom_batch_size_fallbacks,
-                    oom_max_retries=oom_max_retries,
-                    oom_skip_on_failure=oom_skip_on_failure,
-                    save_filter_viz=save_filter_viz,
-                    filter_layer_idx=filter_layer_idx,
-                    filter_out_dir=filter_out_dir,
-                    enable_tensorboard=enable_tensorboard,
-                    tensorboard_root_dir=tensorboard_root_dir,
-                    mask_eval_threshold=mask_eval_threshold,
-                    pi_max_lag=pi_max_lag,
-                    pi_lag_agg=pi_lag_agg,
-                    lr=lr,
-                    early_stop=early_stop,
-                    device=device,
-                )
-                rows.append(row)
-                print(
-                    f"seed={seed:>2} | num_noise={num_noise:>3} | {spec.label:<16} "
-                    f"| status={row['status']:<10} | batch={row['used_batch_size']:>4} "
-                    f"-> R2_test_mean={row['r2_test_mean']:.3f}"
-                )
+    for beta_val in betas:
+        for seed in seeds:
+            for num_noise in num_noise_values:
+                for spec in specs:
+                    is_conv = str(spec.encoder_params.get("encoder_type", "")).startswith("conv")
+                    spec_epochs = conv_epochs if is_conv else epochs
+                    spec_early_stop = conv_early_stop if is_conv else early_stop
+                    row = run_condition(
+                        seed=seed,
+                        num_noise=num_noise,
+                        encoder_spec=spec,
+                        t_max=t_max,
+                        train_ratio=train_ratio,
+                        T=T,
+                        num_blob=num_blob,
+                        orbit_radius=orbit_radius,
+                        trajectory=trajectory,
+                        semi_major=semi_major,
+                        semi_minor=semi_minor,
+                        omega=omega,
+                        sigma_blob=sigma_blob,
+                        noise_ar_coeff=noise_ar_coeff,
+                        centroid_ar_coeff=centroid_ar_coeff,
+                        spatial_bounds=spatial_bounds,
+                        hidden_dim=hidden_dim,
+                        beta=beta_val,
+                        critic=critic,
+                        epochs=spec_epochs,
+                        batch_size=batch_size,
+                        oom_retry_enabled=oom_retry_enabled,
+                        oom_batch_size_fallbacks=oom_batch_size_fallbacks,
+                        oom_max_retries=oom_max_retries,
+                        oom_skip_on_failure=oom_skip_on_failure,
+                        save_filter_viz=save_filter_viz,
+                        filter_layer_idx=filter_layer_idx,
+                        filter_out_dir=filter_out_dir,
+                        enable_tensorboard=enable_tensorboard,
+                        tensorboard_root_dir=tensorboard_root_dir,
+                        mask_eval_threshold=mask_eval_threshold,
+                        pi_max_lag=pi_max_lag,
+                        pi_lag_agg=pi_lag_agg,
+                        lr=lr,
+                        early_stop=spec_early_stop,
+                        device=device,
+                    )
+                    rows.append(row)
+                    print(
+                        f"beta={beta_val:<8g} | seed={seed:>2} | num_noise={num_noise:>3} "
+                        f"| {spec.label:<18} | status={row['status']:<10} "
+                        f"| batch={row['used_batch_size']:>4} | epochs={spec_epochs:>3} "
+                        f"-> R2_test_mean={row['r2_test_mean']:.3f} "
+                        f"| blob_sel={row['blob_sel_rate']:.2f}"
+                    )
+                    # Flush after every condition so a wall-clock kill never wipes
+                    # a multi-hour run (results are otherwise only saved at the end).
+                    save_csv(rows, csv_path)
 
     save_csv(rows, csv_path)
     print(f"Wrote {csv_path}")
