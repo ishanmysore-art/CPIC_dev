@@ -219,12 +219,12 @@ class CPIC(nn.Module):
         if baseline_type == "constant":
             self.baseline = BASELINES[baseline_type]()
         else:
-            if self.predictive_space == "latent":
-                baseline_input_dim = self.T * self.ydim
-            elif self.predictive_space == "observation":
-                assert self.xdim is not None, "xdim must be specified for predictive_space='observation'."
-                baseline_input_dim = self.T * self.xdim
-
+            # The baseline scores the same "y" the critic's y-side scores
+            # (encoded future in latent space, raw future in observation space),
+            # so its input dim is exactly the critic's y_dim. Deriving it this way
+            # keeps latent (T*ydim) and observation (T*xdim by default, or T*N_out
+            # for MISO systems via explicit critic_params) correct by construction.
+            baseline_input_dim = critic_params["y_dim"]
             self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
             self.baseline.to(device)
             
@@ -267,10 +267,22 @@ class CPIC(nn.Module):
                        torch.randn(*encoded_past_mean.size()).to(self.device)
         encoded_past_reshaped = encoded_past.reshape(batch_size, -1)
 
-        encoded_future_mean, encoded_future_vars = self.encoder(X_future)
-        encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
-                       torch.randn(*encoded_future_mean.size()).to(self.device)
-        encoded_future_reshaped = encoded_future.reshape(batch_size, -1)
+        # Only the latent predictive space pushes the future through the encoder.
+        # In observation space the future is used raw, which lets the output
+        # dimension differ from the input dimension (e.g. MISO input/output systems).
+        if self.predictive_space == "latent":
+            if X_future.shape[-1] != X_past.shape[-1]:
+                raise ValueError(
+                    "predictive_space='latent' encodes the future with the same encoder "
+                    f"as the past, so past/future feature dims must match; got past dim "
+                    f"{X_past.shape[-1]} and future dim {X_future.shape[-1]}. Use "
+                    "predictive_space='observation' for input/output systems where "
+                    "N_in != N_out."
+                )
+            encoded_future_mean, encoded_future_vars = self.encoder(X_future)
+            encoded_future = encoded_future_mean + torch.sqrt(encoded_future_vars) * \
+                           torch.randn(*encoded_future_mean.size()).to(self.device)
+            encoded_future_reshaped = encoded_future.reshape(batch_size, -1)
 
         future_reshaped = X_future.reshape(batch_size, -1)
 
@@ -392,39 +404,48 @@ class CPIC(nn.Module):
             'mean': np.ndarray (latent_dim,), 'variance': np.ndarray (latent_dim,).
         """
         self.eval()
+        # In observation space the future is used raw (never encoded), and it may
+        # have a different feature dim than the input (MISO systems), so encoding it
+        # with the input encoder is both meaningless and shape-incompatible. Only
+        # compute future-mean stats when the future is actually encoded (latent space).
+        encode_future = self.predictive_space == "latent"
         past_means, future_means = [], []
         loader = DataLoader(X, batch_size=batch_size, shuffle=False)
         with torch.no_grad():
             for X_past_batch, X_future_batch in loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
-                X_future_batch = X_future_batch.to(torch.float).to(self.device)
                 enc_past_mean, _ = self.encoder(X_past_batch)
-                enc_future_mean, _ = self.encoder(X_future_batch)
-                batch_size_actual = enc_past_mean.shape[0]
                 # take the first timestamp of time series for the encoded past mean
                 past_means.append(enc_past_mean[:, 0, :].cpu().numpy())
-                # take the first timestamp of time series for the encoded future mean
-                future_means.append(enc_future_mean[:, 0, :].cpu().numpy())
+                if encode_future:
+                    X_future_batch = X_future_batch.to(torch.float).to(self.device)
+                    enc_future_mean, _ = self.encoder(X_future_batch)
+                    # take the first timestamp of time series for the encoded future mean
+                    future_means.append(enc_future_mean[:, 0, :].cpu().numpy())
         self.train()
         past_means = np.concatenate(past_means, axis=0)
-        future_means = np.concatenate(future_means, axis=0)
         self.encoded_past_mean_stats = {
             "mean": np.mean(past_means, axis=0),
             "variance": np.var(past_means, axis=0),
         }
-        self.encoded_future_mean_stats = {
-            "mean": np.mean(future_means, axis=0),
-            "variance": np.var(future_means, axis=0),
-        }
+        if encode_future:
+            future_means = np.concatenate(future_means, axis=0)
+            self.encoded_future_mean_stats = {
+                "mean": np.mean(future_means, axis=0),
+                "variance": np.var(future_means, axis=0),
+            }
+        else:
+            self.encoded_future_mean_stats = None
         if writer is not None:
             writer.add_histogram("encoded_mean_stats/encoded_past_mean/mean_in_latent_dimensions", self.encoded_past_mean_stats["mean"], step)
             writer.add_histogram("encoded_mean_stats/encoded_past_mean/variance_in_latent_dimensions", self.encoded_past_mean_stats["variance"], step)
-            writer.add_histogram("encoded_mean_stats/encoded_future_mean/mean_in_latent_dimensions", self.encoded_future_mean_stats["mean"], step)
-            writer.add_histogram("encoded_mean_stats/encoded_future_mean/variance_in_latent_dimensions", self.encoded_future_mean_stats["variance"], step)
             writer.add_scalar("encoded_mean_stats/encoded_past_mean/mean_over_dims", np.mean(self.encoded_past_mean_stats["mean"]), step)
             writer.add_scalar("encoded_mean_stats/encoded_past_mean/variance_over_dims", np.mean(self.encoded_past_mean_stats["variance"]), step)
-            writer.add_scalar("encoded_mean_stats/encoded_future_mean/mean_over_dims", np.mean(self.encoded_future_mean_stats["mean"]), step)
-            writer.add_scalar("encoded_mean_stats/encoded_future_mean/variance_over_dims", np.mean(self.encoded_future_mean_stats["variance"]), step)
+            if encode_future:
+                writer.add_histogram("encoded_mean_stats/encoded_future_mean/mean_in_latent_dimensions", self.encoded_future_mean_stats["mean"], step)
+                writer.add_histogram("encoded_mean_stats/encoded_future_mean/variance_in_latent_dimensions", self.encoded_future_mean_stats["variance"], step)
+                writer.add_scalar("encoded_mean_stats/encoded_future_mean/mean_over_dims", np.mean(self.encoded_future_mean_stats["mean"]), step)
+                writer.add_scalar("encoded_mean_stats/encoded_future_mean/variance_over_dims", np.mean(self.encoded_future_mean_stats["variance"]), step)
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
