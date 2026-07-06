@@ -3,8 +3,8 @@ Visualize saved sparse CPIC encoded representations and decoder weights.
 
 Usage:
     python experiments/video_experiment/visualize_sparse_cpic_outputs.py \
-        --saved-root res/video_sparse_cpic \
-        --seed 22 --signature 22
+        --saved-root res/video_sparse_cpic/xxx \
+        --seed 22 --signature 22 --config experiments/video_experiment/config/xxx.ini
 """
 
 from __future__ import annotations
