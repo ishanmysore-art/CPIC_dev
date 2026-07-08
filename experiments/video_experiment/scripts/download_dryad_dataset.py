@@ -16,8 +16,8 @@ Documentation: https://github.com/datadryad/dryad-app/blob/main/documentation/ap
 
 Example::
 
-    uv run python experiments/video_experiment/download_dryad_dataset.py
-    uv run python experiments/video_experiment/download_dryad_dataset.py --dry-run
+    uv run python experiments/video_experiment/scripts/download_dryad_dataset.py
+    uv run python experiments/video_experiment/scripts/download_dryad_dataset.py --dry-run
 """
 
 from __future__ import annotations
