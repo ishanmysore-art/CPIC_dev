@@ -5,11 +5,20 @@ Usage:
     python experiments/video_experiment/visualize_sparse_cpic_outputs.py \
         --saved-root res/video_sparse_cpic/xxx \
         --seed 22 --signature 22 --config experiments/video_experiment/config/xxx.ini
+
+Example:
+    uv run python experiments/video_experiment/visualize_sparse_cpic_outputs.py \
+    --saved-root res/video_sparse_cpic/llava_youcook2_split_12_patch \
+    --seed 22 \
+    --signature 20260712180445 \
+    --config experiments/video_experiment/config/config_video_sparse_cpic_llava_youcook2_split_12_patch.ini \
+    --frame-shape 10 10
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import pickle
 from pathlib import Path
 
@@ -73,16 +82,21 @@ def _resolve_config_arg(arg: str) -> Path:
 
 
 def _load_encoded_repr(saved_root: Path, seed: int) -> np.ndarray:
-    pkl_path = saved_root / f"encoded_representations_seed{seed}.pkl"
-    if not pkl_path.is_file():
+    pkl_path = saved_root / f"encoded_nxt_seed{seed}.pkl"
+    try:
+        # Prefer builtin open: Path.is_file()/exists() can falsely return False for
+        # gitignored paths (e.g. *.pkl under res/) under some Cursor sandbox setups.
+        with open(os.fspath(pkl_path), "rb") as f:
+            payload = pickle.load(f)
+    except FileNotFoundError as exc:
+        listing = sorted(os.listdir(saved_root)) if os.path.isdir(saved_root) else []
         raise FileNotFoundError(
             f"Missing encoded representation file: {pkl_path}\n"
+            f"saved_root contents: {listing}\n"
             "Check --saved-root and --seed. "
             "If your outputs are under repo root, pass e.g. --saved-root res/video_sparse_cpic."
-        )
-    with pkl_path.open("rb") as f:
-        payload = pickle.load(f)
-    encoded_list = payload["encoded_representations"]
+        ) from exc
+    encoded_list = payload["encoded_nxt"]
     encoded = np.asarray(encoded_list[0], dtype=np.float32)
     if encoded.ndim == 3:
         encoded = encoded[:, -1, :]
@@ -95,12 +109,15 @@ def _load_decoder_weights(saved_root: Path, signature: int, seed: int) -> np.nda
     import torch
 
     ckpt = saved_root / f"sparse_cpic_checkpoint_sig{signature}_seed{seed}.pt"
-    if not ckpt.is_file():
+    try:
+        data = torch.load(os.fspath(ckpt), map_location="cpu")
+    except FileNotFoundError as exc:
+        listing = sorted(os.listdir(saved_root)) if os.path.isdir(saved_root) else []
         raise FileNotFoundError(
             f"Missing checkpoint file: {ckpt}\n"
+            f"saved_root contents: {listing}\n"
             "Check --saved-root, --signature, and --seed."
-        )
-    data = torch.load(ckpt, map_location="cpu")
+        ) from exc
     state = data["model_state_dict"]
     if "decoder.weight" not in state:
         raise KeyError("decoder.weight not found in checkpoint.")
@@ -109,13 +126,16 @@ def _load_decoder_weights(saved_root: Path, signature: int, seed: int) -> np.nda
 
 def _load_reconstructed(saved_root: Path, seed: int) -> np.ndarray:
     pkl_path = saved_root / f"inferred_trials_seed{seed}.pkl"
-    if not pkl_path.is_file():
+    try:
+        with open(os.fspath(pkl_path), "rb") as f:
+            payload = pickle.load(f)
+    except FileNotFoundError as exc:
+        listing = sorted(os.listdir(saved_root)) if os.path.isdir(saved_root) else []
         raise FileNotFoundError(
             f"Missing reconstructed trial file: {pkl_path}\n"
+            f"saved_root contents: {listing}\n"
             "Check --saved-root and --seed."
-        )
-    with pkl_path.open("rb") as f:
-        payload = pickle.load(f)
+        ) from exc
     inferred = payload["inferred_sparse_CPIC_trials"]
     recon = np.asarray(inferred[0], dtype=np.float32)
     if recon.ndim != 2:
@@ -229,39 +249,63 @@ def _plot_decoder(
     if deprecated_top_latents_png.exists():
         deprecated_top_latents_png.unlink()
 
-    if frame_hw is not None and xdim == frame_hw[0] * frame_hw[1] * 3:
-        h, w = frame_hw
-        all_idx = np.arange(ydim)
-        ncols = min(8, max(1, ydim))
-        max_per_fig = 48
-        page = 0
-        for start in range(0, ydim, max_per_fig):
-            page += 1
-            idx_chunk = all_idx[start : start + max_per_fig]
-            n_show = len(idx_chunk)
-            nrows = int(np.ceil(n_show / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(2.2 * ncols, 2.4 * nrows))
-            axes = np.atleast_1d(axes).ravel()
-            for i, ax in enumerate(axes):
-                ax.axis("off")
-                if i >= n_show:
-                    continue
-                j = int(idx_chunk[i])
+    if frame_hw is None:
+        print("Skip decoder basis image plotting: frame shape is not available.")
+        return
+
+    h, w = frame_hw
+    if xdim == h * w * 3:
+        channels = 3
+        mode = "rgb"
+    elif xdim == h * w:
+        channels = 1
+        mode = "gray"
+    else:
+        print(
+            "Skip decoder basis image plotting: observation dim "
+            f"{xdim} != {h}*{w}*3 (RGB) and != {h}*{w} (grayscale)."
+        )
+        return
+
+    all_idx = np.arange(ydim)
+    ncols = min(8, max(1, ydim))
+    max_per_fig = 48
+    page = 0
+    for start in range(0, ydim, max_per_fig):
+        page += 1
+        idx_chunk = all_idx[start : start + max_per_fig]
+        n_show = len(idx_chunk)
+        nrows = int(np.ceil(n_show / ncols))
+        fig, axes = plt.subplots(nrows, ncols, figsize=(2.2 * ncols, 2.4 * nrows))
+        axes = np.atleast_1d(axes).ravel()
+        for i, ax in enumerate(axes):
+            ax.axis("off")
+            if i >= n_show:
+                continue
+            j = int(idx_chunk[i])
+            if channels == 3:
                 basis = decoder_w[:, j].reshape(h, w, 3)
-                bmax = np.percentile(np.abs(basis), 99.0)
-                bmax = max(bmax, 1e-6)
-                ax.imshow(np.clip((basis / (2.0 * bmax)) + 0.5, 0.0, 1.0))
-                ax.set_title(f"latent {j}", fontsize=8)
-            fig.suptitle(
-                (
-                    f"Decoder basis vectors reshaped to RGB frame "
-                    f"(shape={h}x{w}x3), latents {start}-{start + n_show - 1}"
-                ),
-                fontsize=11,
-            )
-            fig.tight_layout()
-            fig.savefig(out_dir / f"decoder_basis_all_latents_rgb_page{page:02d}.png", dpi=180)
-            plt.close(fig)
+            else:
+                basis = decoder_w[:, j].reshape(h, w)
+            bmax = np.percentile(np.abs(basis), 99.0)
+            bmax = max(bmax, 1e-6)
+            img = np.clip((basis / (2.0 * bmax)) + 0.5, 0.0, 1.0)
+            if channels == 3:
+                ax.imshow(img)
+            else:
+                ax.imshow(img, cmap="gray", vmin=0.0, vmax=1.0)
+            ax.set_title(f"latent {j}", fontsize=8)
+        shape_str = f"{h}x{w}x3" if channels == 3 else f"{h}x{w}"
+        fig.suptitle(
+            (
+                f"Decoder basis vectors reshaped to {mode} frame "
+                f"(shape={shape_str}), latents {start}-{start + n_show - 1}"
+            ),
+            fontsize=11,
+        )
+        fig.tight_layout()
+        fig.savefig(out_dir / f"decoder_basis_all_latents_{mode}_page{page:02d}.png", dpi=180)
+        plt.close(fig)
 
 
 def _plot_reconstructed_video(
@@ -275,16 +319,24 @@ def _plot_reconstructed_video(
         return
     h, w = frame_hw
     xdim = recon.shape[1]
-    if xdim != h * w * 3:
+    if xdim == h * w * 3:
+        channels = 3
+    elif xdim == h * w:
+        channels = 1
+    else:
         print(
             "Skip reconstructed video plotting: reconstructed feature dimension "
-            f"{xdim} != {h}*{w}*3."
+            f"{xdim} != {h}*{w}*3 (RGB) and != {h}*{w} (grayscale)."
         )
         return
 
     plt = _import_matplotlib_pyplot()
-    recon_img = np.clip(recon.reshape(-1, h, w, 3), 0.0, 1.0)
+    if channels == 3:
+        recon_img = np.clip(recon.reshape(-1, h, w, 3), 0.0, 1.0)
+    else:
+        recon_img = np.clip(recon.reshape(-1, h, w), 0.0, 1.0)
     n_time = recon_img.shape[0]
+    shape_str = f"{h}x{w}x3" if channels == 3 else f"{h}x{w}"
 
     n_show = min(12, n_time)
     idx = np.linspace(0, n_time - 1, n_show, dtype=int)
@@ -297,9 +349,12 @@ def _plot_reconstructed_video(
         if i >= n_show:
             continue
         t = int(idx[i])
-        ax.imshow(recon_img[t])
+        if channels == 3:
+            ax.imshow(recon_img[t])
+        else:
+            ax.imshow(recon_img[t], cmap="gray", vmin=0.0, vmax=1.0)
         ax.set_title(f"t={t}", fontsize=9)
-    fig.suptitle(f"Reconstructed video samples (shape={h}x{w}x3, n_frames={n_time})", fontsize=12)
+    fig.suptitle(f"Reconstructed video samples (shape={shape_str}, n_frames={n_time})", fontsize=12)
     fig.tight_layout()
     fig.savefig(out_dir / "reconstructed_video_samples.png", dpi=180)
     plt.close(fig)
@@ -312,7 +367,10 @@ def _plot_reconstructed_video(
         gif_idx = np.linspace(0, n_time - 1, n_gif, dtype=int)
         fig, ax = plt.subplots(figsize=(4, 4))
         ax.axis("off")
-        im = ax.imshow(recon_img[int(gif_idx[0])])
+        if channels == 3:
+            im = ax.imshow(recon_img[int(gif_idx[0])])
+        else:
+            im = ax.imshow(recon_img[int(gif_idx[0])], cmap="gray", vmin=0.0, vmax=1.0)
 
         def _update(i: int):
             im.set_data(recon_img[int(gif_idx[i])])
