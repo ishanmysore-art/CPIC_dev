@@ -32,7 +32,7 @@ class CPIC(nn.Module):
     mi_params : dict, optional
         Parameters for mutual information estimation. A dictionary with keys:
             estimator_compress : str
-                Estimator for I_compress. One of ['infonce_lower', 'nwj_lower', 'tuba_lower']. Default is 'infonce_lower'.
+                Estimator for I_compress (an UPPER bound on I(X;Z), since this term is minimized). One of ['infonce_upper', 'vub', 'nwj', 'tuba', 'mine']. Default is 'infonce_upper'.
             estimator_predictive : str
                 Estimator for I_predictive. One of ['infonce_lower', 'nwj_lower', 'tuba_lower']. Default is 'infonce_lower'.
             critic : str
@@ -160,8 +160,8 @@ class CPIC(nn.Module):
 
         # initialize critic and baseline networks for I_predictive bound
         default_mi_params = {
-            'estimator_compress': 'infonce_lower',
-            'estimator_predictive': 'infonce_lower',
+            'estimator_compress': 'infonce_upper', # I_compress is the rate term and is MINIMIZED, so it needs an UPPER bound on I(X;Z). A lower bound like 'infonce_lower' is degenerate to minimize (variances collapse, bound -> -inf). 'vub' is a self-regularizing analytic upper bound alternative.
+            'estimator_predictive': 'infonce_lower', # I_predictive is the predictive term and is MAXIMIZED, so it needs a lower bound on I(Z;Y)
             'critic': 'concat',
             'baseline': 'constant',
         }
@@ -262,12 +262,15 @@ class CPIC(nn.Module):
         else:
             raise ValueError('The predictive space is not specified.')
 
+        # Compression contribution: fixed-weight penalty (beta * I_compress).
+        compress_term = self.beta * I_compress_bound
+
         if self.beta2 > 0:
             I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
                                                  future_reshaped, critic_fn=self.critic_YX, device=self.device)
-            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+            L = compress_term - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
         else:
-            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
+            L = compress_term - self.beta1 * I_predictive_bound
 
         if self.regularization_weight > 0:
             weight = self.encoder._mean.weight
@@ -365,7 +368,7 @@ class CPIC(nn.Module):
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None):
         """
         Fit the CPIC model to the data X.
 
@@ -388,6 +391,19 @@ class CPIC(nn.Module):
         compute_encoded_mean_stats : bool, optional
             If True, compute and store mean/variance of encoded past and future means after training,
             and log them to writer if provided. The default is True.
+        epoch_callback : callable, optional
+            If provided, called as ``epoch_callback(epoch, self)`` at the end of every
+            epoch (after writer logging, before the early-stop check). Intended for
+            experiment-side diagnostics that need per-epoch access to the model
+            (e.g. probe R2 or per-feature gate curves) without coupling this generic
+            trainer to experiment-specific labels. The default is None.
+        mask_logit_lr : float, optional
+            If provided, the FeatureMaskMLP gate logits (parameters whose name
+            contains ``mask_logits``) are placed in their own optimizer param group
+            with this learning rate, while all other parameters keep ``lr``. The
+            gate logits receive a weak gradient and otherwise converge very slowly;
+            a larger dedicated LR lets them reach their asymptote in far fewer
+            epochs. No effect on encoders without gate logits. The default is None.
         """
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
         infonce_upper_keys = [
@@ -421,10 +437,31 @@ class CPIC(nn.Module):
                 torch.from_numpy(init_weights.T).to(self.encoder._mean.weight.dtype).to(self.device))
         self.init_weights = init_weights
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        if mask_logit_lr is not None:
+            mask_params, other_params = [], []
+            for name, p in self.named_parameters():
+                if not p.requires_grad:
+                    continue
+                (mask_params if "mask_logits" in name else other_params).append(p)
+            if mask_params:
+                optimizer = torch.optim.Adam(
+                    [{"params": other_params, "lr": lr},
+                     {"params": mask_params, "lr": mask_logit_lr}]
+                )
+            else:
+                optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        else:
+            optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_loss = np.inf
         best_I_compress = np.nan
         best_I_predictive = np.nan
+        # Achieved rate at the final epoch (the honest converged I_compress), exposed
+        # so callers can log it as a latent-quality metric without re-reading TB.
+        self.final_mean_I_compress = float("nan")
+        # Achieved predictive information at the final epoch. An estimator-native
+        # latent-quality number (does not presuppose linear decodability, unlike the
+        # position/velocity probe R2), logged by callers as a latent-quality metric.
+        self.final_mean_I_predictive = float("nan")
         no_improve = 0 # counter for early stopping
         global_step = 0 # for tensorboard logging
 
@@ -475,7 +512,10 @@ class CPIC(nn.Module):
             mean_loss = np.mean(loss_by_epoch)
             mean_I_compress = np.mean(I_compress_bound_by_epoch)
             mean_I_predictive = np.mean(I_predictive_bound_by_epoch)
+            self.final_mean_I_compress = float(mean_I_compress)
+            self.final_mean_I_predictive = float(mean_I_predictive)
             print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}")
+
             if writer:
                 writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
                 
@@ -492,6 +532,9 @@ class CPIC(nn.Module):
                 if compute_encoded_mean_stats:
                     self.compute_encoded_mean_stats(X, batch_size=batch_size, writer=writer, step=epoch)
 
+            if epoch_callback is not None:
+                epoch_callback(epoch, self)
+
             if mean_loss < best_loss:
                 best_loss = mean_loss
                 best_I_compress = mean_I_compress
@@ -502,7 +545,7 @@ class CPIC(nn.Module):
                 if no_improve >= early_stop:
                     print("Early stopping...")
                     break
-                
+
         if not np.isfinite(best_loss):
             raise RuntimeError(
                 "Training did not produce a finite epoch loss. This usually indicates non-finite "

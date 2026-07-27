@@ -38,15 +38,21 @@ from filter_visualization import (
     compute_trajectory_in_grid_coords,
     compute_avg_density_grid,
 )
+from probe_visualization import save_probe_viz_artifacts
 from generate_particle_dynamics import generate_particle_process_timeseries  # type: ignore[reportMissingImports]
 
 
 _CONFIG_DIR = Path(__file__).resolve().parent / "config"
+# Named-config shortcuts for the current configs. A full path to any .ini also works
+# (and is the normal way to run these).
 config_file_dict = {
-    "particle_all_circle": str(_CONFIG_DIR / "config_particle_all_circle.ini"),
-    "particle_circle": str(_CONFIG_DIR / "config_particle_circle.ini"),
-    "particle_ellipse": str(_CONFIG_DIR / "config_particle_ellipse.ini"),
     "particle_beta_sweep": str(_CONFIG_DIR / "config_particle_beta_sweep.ini"),
+    "particle_noise_sweep": str(_CONFIG_DIR / "config_particle_noise_sweep.ini"),
+    "particle_noise_sweep_noblob": str(_CONFIG_DIR / "config_particle_noise_sweep_noblob.ini"),
+    "particle_blob_sweep": str(_CONFIG_DIR / "config_particle_blob_sweep.ini"),
+    "particle_nonclosed_noise_sweep": str(_CONFIG_DIR / "config_particle_nonclosed_noise_sweep.ini"),
+    "particle_noblob_control": str(_CONFIG_DIR / "config_particle_noblob_control.ini"),
+    "particle_probe_figs": str(_CONFIG_DIR / "config_particle_probe_figs.ini"),
 }
 
 
@@ -445,7 +451,8 @@ def build_past_windows_and_gt(
     t_min: int,
     t_max: int,
     encode_chunk_size: int = 256,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_end_times: bool = False,
+) -> tuple[np.ndarray, ...]:
     """Encode sliding past windows and align corresponding latent targets.
 
     The encode is chunked so peak memory scales with ``encode_chunk_size``, not
@@ -463,6 +470,11 @@ def build_past_windows_and_gt(
             z_chunks.append(encoded[:, -1, :].cpu().numpy())
     z = np.concatenate(z_chunks, axis=0)
     gt = gt_latent[end_times - 1]
+    if return_end_times:
+        # Callers that probe additional per-time targets (velocity, noise centroid)
+        # reuse these encoded latents by aligning their own target arrays with the
+        # same `end_times - 1` index, avoiding a second (expensive) encode pass.
+        return z, gt, end_times
     return z, gt
 
 
@@ -475,6 +487,97 @@ def heldout_probe_r2(z_train: np.ndarray, gt_train: np.ndarray, z_test: np.ndarr
         "r2_test_y": float(r2_score(gt_test[:, 1], pred_test[:, 1])),
         "r2_test_mean": float(r2_score(gt_test, pred_test, multioutput="uniform_average")),
     }
+
+
+def build_velocity_gt(gt_latent: np.ndarray) -> np.ndarray:
+    """First-order dynamics target: per-step blob-centroid velocity, shape (t_max, 2).
+
+    Position-R2 rewards "observation" mode that models high-variance,
+    temporally predictable noise; the orbit's *velocity* (heading + speed) is a
+    coherent-blob-only signal — the random-walk noise particles average to no net
+    velocity — so velocity-R2 measures whether the latent tracks the dynamics while
+    suppressing noise. Derived by finite-differencing the same normalized centroid
+    used for position-R2, so it inherits that normalization; row 0 is zero-padded and
+    never indexed (windows end at t >= window_size >= 1).
+    """
+    v = np.zeros_like(gt_latent)
+    v[1:] = np.diff(gt_latent, axis=0)
+    return v.astype(np.float32)
+
+
+def build_noise_centroid_gt(positions: np.ndarray, particle_labels: np.ndarray) -> np.ndarray:
+    """Noise-cloud centroid target: mean position of the noise particles, shape (t_max, 2).
+
+    Noise-suppression diagnostic. A latent that ignores the random-walk noise
+    should decode this *poorly*; the headline contrast is high velocity-R2 with low
+    noise-R2. The mean over many AR(1) walkers is near-zero and low-variance, so this
+    R2 can sit near the floor for every encoder — that near-floor value is itself the
+    evidence the latent is not tracking noise. Uses the noise sub-population mean so it
+    stays 2-D and comparable across ``num_noise`` sweep points.
+    """
+    noise_mask = np.asarray(particle_labels) == 0
+    if not noise_mask.any():
+        return np.zeros((positions.shape[0], 2), dtype=np.float32)
+    return positions[:, noise_mask, :].mean(axis=1).astype(np.float32)
+
+
+def log_convergence_epoch(
+    epoch: int,
+    model: CPIC,
+    *,
+    writer,
+    probe_eval_every: int,
+    total_epochs: int,
+    data: np.ndarray,
+    gt_latent: np.ndarray,
+    T: int,
+    device: str,
+    t_split: int,
+    t_max: int,
+    particle_labels: np.ndarray,
+    particle_order: np.ndarray,
+    mask_eval_threshold: float,
+    encode_chunk_size: int,
+) -> None:
+    """Per-epoch convergence diagnostics for a single training run.
+
+    Logs two families of curves that training loss alone does not reveal:
+      * ``epoch/gate/*`` (mask encoders only) — mean gate prob on blob vs noise
+        features, active fraction, and blob-selection precision, so one can see
+        whether the gates are still moving at the final epoch (undertrained) or
+        have plateaued (genuine behavior).
+      * ``epoch/probe_r2/*`` (all encoders, every ``probe_eval_every`` epochs and
+        on the final epoch) — held-out linear-probe R2, the reported predictivity
+        metric, as a learning curve to confirm asymptotic performance.
+    """
+    if writer is None:
+        return
+
+    probs = get_mask_probs(model)
+    if probs is not None:
+        feat_labels = np.repeat(particle_labels[particle_order], 2)
+        blob = probs[feat_labels == 1]
+        noise = probs[feat_labels == 0]
+        active = probs >= mask_eval_threshold
+        writer.add_scalar("epoch/gate/mean_blob", float(blob.mean()) if blob.size else float("nan"), epoch)
+        writer.add_scalar("epoch/gate/mean_noise", float(noise.mean()) if noise.size else float("nan"), epoch)
+        writer.add_scalar("epoch/gate/active_frac", float(active.mean()), epoch)
+        blob_sel = float(np.mean(feat_labels[active] == 1)) if active.sum() > 0 else 0.0
+        writer.add_scalar("epoch/gate/blob_sel_rate", blob_sel, epoch)
+
+    if probe_eval_every > 0 and (epoch % probe_eval_every == 0 or epoch == total_epochs - 1):
+        z_train, gt_train = build_past_windows_and_gt(
+            data, gt_latent, T, model, device, t_min=T, t_max=t_split,
+            encode_chunk_size=encode_chunk_size,
+        )
+        z_test, gt_test = build_past_windows_and_gt(
+            data, gt_latent, T, model, device, t_min=t_split, t_max=t_max,
+            encode_chunk_size=encode_chunk_size,
+        )
+        m = heldout_probe_r2(z_train, gt_train, z_test, gt_test)
+        writer.add_scalar("epoch/probe_r2/test_mean", m["r2_test_mean"], epoch)
+        writer.add_scalar("epoch/probe_r2/test_x", m["r2_test_x"], epoch)
+        writer.add_scalar("epoch/probe_r2/test_y", m["r2_test_y"], epoch)
 
 
 def run_condition(
@@ -494,10 +597,14 @@ def run_condition(
     sigma_blob: float,
     noise_ar_coeff: float,
     centroid_ar_coeff: float,
+    torus_ratio: float,
+    torus_r2: float,
     spatial_bounds: float,
     hidden_dim: int,
+    ydim: int,
     beta: float,
     critic: str,
+    estimator_compress: str,
     epochs: int,
     batch_size: int,
     oom_retry_enabled: bool,
@@ -507,12 +614,16 @@ def run_condition(
     save_filter_viz: bool,
     filter_layer_idx: int,
     filter_out_dir: Path,
+    save_probe_viz: bool,
+    probe_out_dir: Path,
     enable_tensorboard: bool,
     tensorboard_root_dir: Path,
     mask_eval_threshold: float,
     pi_max_lag: int,
     pi_lag_agg: str,
+    probe_eval_every: int,
     lr: float,
+    mask_logit_lr: float | None,
     early_stop: int,
     device: str,
 ) -> dict:
@@ -533,6 +644,8 @@ def run_condition(
         sigma_blob=sigma_blob,
         noise_ar_coeff=noise_ar_coeff,
         centroid_ar_coeff=centroid_ar_coeff,
+        torus_ratio=torus_ratio,
+        torus_r2=torus_r2,
         spatial_bounds=spatial_bounds,
         seed=seed,
     )
@@ -555,6 +668,12 @@ def run_condition(
 
     model: CPIC | None = None
     metrics: dict[str, float] | None = None
+    vel_metrics: dict[str, float] | None = None
+    noise_metrics: dict[str, float] | None = None
+    # Captured on the successful attempt so the probe-viz figure can be rendered AFTER
+    # the OOM-retry loop (mirrors save_filter_viz), avoiding a plotting error aborting a
+    # training run. Holds (z_train, gt_train, z_test, gt_test, vel_train, vel_test).
+    probe_viz_data: tuple[np.ndarray, ...] | None = None
     used_batch_size: int | None = None
     status = "success"
     error_type = ""
@@ -570,12 +689,12 @@ def run_condition(
         writer = None
         try:
             model = CPIC(
-                ydim=2,
+                ydim=ydim,
                 xdim=data.shape[1],
                 T=T,
                 encoder_params=encoder_params,
                 mi_params={
-                    "estimator_compress": "infonce_lower",
+                    "estimator_compress": estimator_compress,
                     "estimator_predictive": "infonce_lower",
                     "critic": critic,
                     "baseline": "constant",
@@ -591,6 +710,26 @@ def run_condition(
                 tb_dir.mkdir(parents=True, exist_ok=True)
                 writer = summary_writer_cls(log_dir=str(tb_dir))
                 tensorboard_log_dir = str(tb_dir)
+
+            epoch_callback = None
+            if writer is not None:
+                epoch_callback = lambda epoch, m: log_convergence_epoch(
+                    epoch, m,
+                    writer=writer,
+                    probe_eval_every=probe_eval_every,
+                    total_epochs=epochs,
+                    data=data,
+                    gt_latent=gt_latent,
+                    T=T,
+                    device=device,
+                    t_split=t_split,
+                    t_max=t_max,
+                    particle_labels=particle_labels,
+                    particle_order=particle_order,
+                    mask_eval_threshold=mask_eval_threshold,
+                    encode_chunk_size=curr_batch_size,
+                )
+
             model.fit(
                 X=train_data,
                 epochs=epochs,
@@ -598,17 +737,34 @@ def run_condition(
                 lr=lr,
                 early_stop=early_stop,
                 writer=writer,
+                epoch_callback=epoch_callback,
+                mask_logit_lr=mask_logit_lr,
             )
 
-            z_train, gt_train = build_past_windows_and_gt(
+            z_train, gt_train, et_train = build_past_windows_and_gt(
                 data, gt_latent, T, model, device, t_min=T, t_max=t_split,
-                encode_chunk_size=curr_batch_size,
+                encode_chunk_size=curr_batch_size, return_end_times=True,
             )
-            z_test, gt_test = build_past_windows_and_gt(
+            z_test, gt_test, et_test = build_past_windows_and_gt(
                 data, gt_latent, T, model, device, t_min=t_split, t_max=t_max,
-                encode_chunk_size=curr_batch_size,
+                encode_chunk_size=curr_batch_size, return_end_times=True,
             )
             metrics = heldout_probe_r2(z_train, gt_train, z_test, gt_test)
+            # Latent-dynamics metrics: reuse the encoded latents (z_train/z_test) and
+            # align first-order-dynamics + noise targets with the same end_times index.
+            vel_gt = build_velocity_gt(gt_latent)
+            noise_gt = build_noise_centroid_gt(positions, particle_labels)
+            vel_metrics = heldout_probe_r2(
+                z_train, vel_gt[et_train - 1], z_test, vel_gt[et_test - 1]
+            )
+            noise_metrics = heldout_probe_r2(
+                z_train, noise_gt[et_train - 1], z_test, noise_gt[et_test - 1]
+            )
+            if save_probe_viz:
+                probe_viz_data = (
+                    z_train, gt_train, z_test, gt_test,
+                    vel_gt[et_train - 1], vel_gt[et_test - 1],
+                )
             used_batch_size = curr_batch_size
             # A later attempt succeeding must clear any oom_failed status left
             # by earlier (larger-batch) attempts; status is otherwise sticky.
@@ -642,6 +798,10 @@ def run_condition(
             )
         metrics = {"r2_test_x": float("nan"), "r2_test_y": float("nan"), "r2_test_mean": float("nan")}
         used_batch_size = -1
+    if vel_metrics is None:
+        vel_metrics = {"r2_test_x": float("nan"), "r2_test_y": float("nan"), "r2_test_mean": float("nan")}
+    if noise_metrics is None:
+        noise_metrics = {"r2_test_x": float("nan"), "r2_test_y": float("nan"), "r2_test_mean": float("nan")}
 
     mask_active_frac = float("nan")
     mask_active_indices = ""
@@ -691,6 +851,51 @@ def run_condition(
         filter_trajectory_density_path = filter_paths.get("filter_trajectory_density_path", "")
         filter_meta_path = filter_paths.get("filter_meta_path", "")
 
+    # Probe-result spatial viz: position-trajectory overlay + true-vs-predicted velocity
+    # field, rendered from the arrays captured on the successful attempt. Wrapped so a
+    # plotting failure only drops the figure, never the run's metrics.
+    probe_plot_path = ""
+    probe_npz_path = ""
+    if status == "success" and save_probe_viz and probe_viz_data is not None:
+        try:
+            z_tr, gt_tr, z_te, gt_te, vel_tr, vel_te = probe_viz_data
+            pos_probe = LinearRegression().fit(z_tr, gt_tr)
+            vel_probe = LinearRegression().fit(z_tr, vel_tr)
+            pred_pos = pos_probe.predict(z_te)
+            vel_pred = vel_probe.predict(z_te)
+            probe_paths = save_probe_viz_artifacts(
+                probe_out_dir,
+                seed=seed,
+                num_noise=num_noise,
+                num_blob=num_blob,
+                encoder_label=encoder_spec.label,
+                gt_pos=gt_te,
+                pred_pos=pred_pos,
+                vel_true=vel_te,
+                vel_pred=vel_pred,
+                r2_pos=float(metrics.get("r2_test_mean", float("nan"))),
+                r2_vel=float(vel_metrics.get("r2_test_mean", float("nan"))),
+            )
+            probe_plot_path = probe_paths.get("probe_plot_path", "")
+            probe_npz_path = probe_paths.get("probe_npz_path", "")
+        except Exception as exc:
+            print(f"[WARN] Could not render probe viz: {exc}")
+
+    # Achieved rate at the final epoch — the honest converged I_compress, an
+    # estimator-native compression number logged alongside the R2 families.
+    final_I_compress = (
+        float(getattr(model, "final_mean_I_compress", float("nan")))
+        if model is not None
+        else float("nan")
+    )
+    # Estimator-native latent-quality metric: converged predictive information,
+    # reported alongside the linear probe R2 so latent quality is not judged by linear
+    # position-decodability alone.
+    final_I_predictive = (
+        float(getattr(model, "final_mean_I_predictive", float("nan")))
+        if model is not None
+        else float("nan")
+    )
     if model is not None:
         del model
     cleanup_memory(device)
@@ -698,11 +903,17 @@ def run_condition(
     return {
         "seed": seed,
         "num_noise": num_noise,
+        "num_blob": num_blob,
+        "ydim": ydim,
         "beta": beta,
+        "final_I_compress": final_I_compress,
+        "final_I_predictive": final_I_predictive,
         "trajectory": trajectory,
         "sigma_noise": sigma_noise,
         "noise_ar_coeff": noise_ar_coeff,
         "centroid_ar_coeff": centroid_ar_coeff,
+        "torus_ratio": torus_ratio,
+        "torus_r2": torus_r2,
         "encoder_label": encoder_spec.label,
         "predictive_space": encoder_spec.predictive_space,
         "status": status,
@@ -720,7 +931,18 @@ def run_condition(
         "filter_plot_path": filter_plot_path,
         "filter_trajectory_density_path": filter_trajectory_density_path,
         "filter_meta_path": filter_meta_path,
+        "probe_plot_path": probe_plot_path,
+        "probe_npz_path": probe_npz_path,
         "tensorboard_log_dir": tensorboard_log_dir,
+        # Latent-dynamics metrics: velocity (first-order dynamics; blob-only signal)
+        # and noise-cloud-centroid decodability (should be near floor for a noise-suppressing
+        # latent). Headline contrast = high velocity-R2 with low noise-R2.
+        "r2_velocity_x": vel_metrics["r2_test_x"],
+        "r2_velocity_y": vel_metrics["r2_test_y"],
+        "r2_velocity_mean": vel_metrics["r2_test_mean"],
+        "r2_noise_x": noise_metrics["r2_test_x"],
+        "r2_noise_y": noise_metrics["r2_test_y"],
+        "r2_noise_mean": noise_metrics["r2_test_mean"],
         **metrics,
     }
 
@@ -837,6 +1059,104 @@ def plot_r2_vs_num_noise(rows: list[dict], out_png: Path) -> None:
     plt.close(fig)
 
 
+# Metric families plotted against a sweep axis: (column, panel title).
+_R2_FAMILY_PANELS = [
+    ("r2_test_mean", "Position R²"),
+    ("r2_velocity_mean", "Velocity R²"),
+    ("r2_noise_mean", "Noise-cloud R²"),
+]
+# Estimator-native latent-quality panels (nats): converged predictive information and
+# achieved compression rate, plotted against the same sweep axes as the R² families.
+_MI_FAMILY_PANELS = [
+    ("final_I_predictive", "Predictive info  I_pred (nats)"),
+    ("final_I_compress", "Rate  I_compress (nats)"),
+]
+
+
+def plot_r2_families_vs_sweep(
+    rows: list[dict],
+    x_col: str,
+    x_label: str,
+    out_png: Path,
+    panels: list[tuple[str, str]] = _R2_FAMILY_PANELS,
+    ylabel: str = r"Test linear-probe $R^2$",
+    logx: bool = False,
+) -> None:
+    """Plot a row of metric-family panels versus a sweep axis by encoder.
+
+    Generalizes ``plot_r2_vs_num_noise`` to any swept quantity (``num_noise``,
+    ``num_blob``, ...) and any panel set (the three latent-quality R² families by
+    default, or the MI/PI families via ``panels=_MI_FAMILY_PANELS``), so the same
+    house-styled panel row can be produced for each sweep dimension and metric group.
+    Each point is the seed mean with a +/-1 std error bar; styling (color per encoder,
+    dotted/hollow latent vs solid/filled observation) matches the canonical plotter.
+    """
+    import pandas as pd
+    from matplotlib.lines import Line2D
+
+    from plot_particle_results import (
+        _base_family_from_label,
+        _color_for_label,
+        _line_style_for_label,
+        _marker_facecolor_for_label,
+    )
+
+    df = pd.DataFrame(rows)
+    df = df[df["status"] == "success"].copy()
+    panels = [(c, t) for c, t in panels if c in df.columns]
+    if df.empty or not panels or x_col not in df.columns:
+        return
+
+    _fallback: dict[str, tuple] = {}
+    cmap = plt.get_cmap("tab10")
+
+    def resolve_color(label: str):
+        c = _color_for_label(label)
+        if c is not None:
+            return c
+        fam = _base_family_from_label(label)
+        if fam not in _fallback:
+            _fallback[fam] = cmap(len(_fallback) % 10)
+        return _fallback[fam]
+
+    fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 5), squeeze=False)
+    axes = axes[0]
+    for ax, (col, title) in zip(axes, panels):
+        agg = (
+            df.groupby(["encoder_label", x_col], as_index=False)[col]
+            .agg(mean="mean", std="std")
+            .sort_values(["encoder_label", x_col])
+        )
+        for label, sub in agg.groupby("encoder_label"):
+            c = resolve_color(label)
+            ax.errorbar(
+                sub[x_col].to_numpy(dtype=float), sub["mean"].to_numpy(dtype=float),
+                yerr=sub["std"].fillna(0.0).to_numpy(dtype=float),
+                fmt="o", linestyle=_line_style_for_label(label), color=c,
+                markerfacecolor=_marker_facecolor_for_label(label, c), markeredgecolor=c,
+                linewidth=2, markersize=6, capsize=3, elinewidth=1.2, label=label,
+            )
+        ax.set_xlabel(x_label, fontsize=13)
+        ax.set_ylabel(ylabel, fontsize=13)
+        ax.set_title(title, fontsize=14)
+        ax.axhline(0.0, color="black", linewidth=0.6, linestyle="--")
+        if logx:
+            ax.set_xscale("log")
+        ax.tick_params(axis="both", labelsize=11)
+
+    legend_handles = [
+        Line2D([0], [0], color=resolve_color(lbl), linestyle=_line_style_for_label(lbl),
+               marker="o", markersize=6, linewidth=2,
+               markerfacecolor=_marker_facecolor_for_label(lbl, resolve_color(lbl)),
+               markeredgecolor=resolve_color(lbl), label=lbl)
+        for lbl in sorted(df["encoder_label"].unique())
+    ]
+    axes[0].legend(handles=legend_handles, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Batch particle dynamics encoder sweep using config files.")
     parser.add_argument("--config", type=str, default="particle_circle")
@@ -846,8 +1166,13 @@ if __name__ == "__main__":
 
     if args.config in config_file_dict:
         config_file = config_file_dict[args.config]
+    elif Path(args.config).is_file():
+        config_file = args.config
     else:
-        raise ValueError(f"Unknown config {args.config!r}. Available: {list(config_file_dict.keys())}")
+        raise ValueError(
+            f"Unknown config {args.config!r}. Pass a registered name "
+            f"({list(config_file_dict.keys())}) or a path to an .ini file."
+        )
 
     cfg = MyConf()
     cfg.read(config_file)
@@ -866,6 +1191,13 @@ if __name__ == "__main__":
     train_ratio = cfg.getfloat("Data", "train_ratio")
     T = cfg.getint("Data", "T")
     num_blob = cfg.getint("Data", "num_blob")
+    # Optional num_blob sweep (mirrors num_noise_values). When [Sweep] num_blob_values
+    # is absent, fall back to the single [Data] num_blob so existing configs are
+    # unchanged. Sweeping it traces how the coherent signal strength (particles on the
+    # orbit) drives position/velocity R2 — the num_blob=0 end is the no-blob control.
+    num_blob_values = parse_int_list(
+        cfg.get("Sweep", "num_blob_values", fallback=str(num_blob))
+    )
     orbit_radius = cfg.getfloat("Data", "orbit_radius")
     trajectory = cfg.get("Data", "trajectory", fallback="circle").strip()
     _semi_major_str = cfg.get("Data", "semi_major", fallback="").strip()
@@ -876,11 +1208,24 @@ if __name__ == "__main__":
     sigma_blob = cfg.getfloat("Data", "sigma_blob")
     noise_ar_coeff = float_or_default(cfg, "Data", "noise_ar_coeff", 0.8)
     centroid_ar_coeff = float_or_default(cfg, "Data", "centroid_ar_coeff", 0.95)
+    # Incommensurate-torus params (trajectory=torus). Default ratio = golden ratio
+    # (maximally non-closing); torus_r2=0 reduces the torus to the plain circle.
+    torus_ratio = float_or_default(cfg, "Data", "torus_ratio", (1.0 + 5.0 ** 0.5) / 2.0)
+    torus_r2 = float_or_default(cfg, "Data", "torus_r2", 0.0)
     spatial_bounds = cfg.getfloat("Data", "spatial_bounds")
 
     hidden_dim = cfg.getint("Model", "hidden_dim")
+    # Latent dimensionality. Default 2 (the historical hardcoded value). Increasing it
+    # gives the representation more volume; used by the ydim sweep to study how spatial
+    # (ydim) and temporal (beta) compression interact.
+    ydim = int_or_default(cfg, "Model", "ydim", 2)
     beta = cfg.getfloat("Model", "beta")
     critic = cfg.get("Model", "critic", fallback="concat")
+    # Compression (rate) estimator. This term is MINIMIZED, so it needs an UPPER bound
+    # on I(X;Z): "infonce_upper" (default, matches CPIC.py) or "vub" (analytic
+    # KL(encoder || N(0,I))). A lower bound like "infonce_lower" is degenerate to
+    # minimize (variances collapse, bound -> -inf).
+    estimator_compress = cfg.get("Model", "estimator_compress", fallback="infonce_upper")
 
     # Optional beta sweep: if [Sweep] betas is set, loop over those values as the
     # outermost dimension (the "interpretability knob" experiment). Otherwise use
@@ -892,6 +1237,9 @@ if __name__ == "__main__":
     epochs = cfg.getint("Training", "epochs")
     batch_size = cfg.getint("Training", "batch_size")
     lr = cfg.getfloat("Training", "lr")
+    # Optional dedicated LR for FeatureMaskMLP gate logits (they converge slowly at
+    # the base LR). Unset -> None -> single param group (default behavior).
+    mask_logit_lr = cfg.getfloat("Training", "mask_logit_lr") if cfg.has_option("Training", "mask_logit_lr") else None
     early_stop = cfg.getint("Training", "early_stop")
     # Conv encoders are the runtime bottleneck and converge in far fewer epochs
     # than the MaskMLP discovery recipe needs. Allow a separate (smaller) budget
@@ -907,11 +1255,17 @@ if __name__ == "__main__":
     save_filter_viz = bool_or_default(cfg, "Analysis", "save_filter_viz", False)
     filter_layer_idx = int_or_default(cfg, "Analysis", "filter_layer_idx", 0)
     filter_out_subdir = cfg.get("Analysis", "filter_out_dir", fallback="filters")
+    # Opt-in probe-result spatial figures (position overlay + velocity field). Off by
+    # default: it refits two probes and writes a PNG+npz per successful condition.
+    save_probe_viz = bool_or_default(cfg, "Analysis", "save_probe_viz", False)
+    probe_out_subdir = cfg.get("Analysis", "probe_out_dir", fallback="probe_viz")
     enable_tensorboard = bool_or_default(cfg, "Analysis", "enable_tensorboard", False)
     tensorboard_subdir = cfg.get("Analysis", "tensorboard_dir", fallback="tensorboard")
     mask_eval_threshold = float_or_default(cfg, "Analysis", "mask_eval_threshold", 0.5)
     pi_max_lag = int_or_default(cfg, "Analysis", "pi_max_lag", 1)
     pi_lag_agg = cfg.get("Analysis", "pi_lag_agg", fallback="mean").strip().lower()
+    # Per-epoch held-out probe-R2 curve cadence (0 disables; only active with TensorBoard).
+    probe_eval_every = int_or_default(cfg, "Analysis", "probe_eval_every", 0)
 
     use_gpu = cfg.getboolean("Compute", "use_gpu")
     device_pref = args.device or cfg.get("Compute", "device", fallback="auto")
@@ -921,9 +1275,12 @@ if __name__ == "__main__":
     csv_path = output_dir / cfg.get("Paths", "csv_name")
     plot_path = output_dir / cfg.get("Paths", "plot_name")
     filter_out_dir = output_dir / filter_out_subdir
+    probe_out_dir = output_dir / probe_out_subdir
     tensorboard_root_dir = output_dir / tensorboard_subdir
     if save_filter_viz:
         filter_out_dir.mkdir(parents=True, exist_ok=True)
+    if save_probe_viz:
+        probe_out_dir.mkdir(parents=True, exist_ok=True)
     if enable_tensorboard:
         tensorboard_root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -931,6 +1288,7 @@ if __name__ == "__main__":
     for beta_val in betas:
         for seed in seeds:
             for num_noise in num_noise_values:
+              for num_blob_val in num_blob_values:
                 for spec in specs:
                     is_conv = str(spec.encoder_params.get("encoder_type", "")).startswith("conv")
                     spec_epochs = conv_epochs if is_conv else epochs
@@ -942,7 +1300,7 @@ if __name__ == "__main__":
                         t_max=t_max,
                         train_ratio=train_ratio,
                         T=T,
-                        num_blob=num_blob,
+                        num_blob=num_blob_val,
                         orbit_radius=orbit_radius,
                         trajectory=trajectory,
                         semi_major=semi_major,
@@ -951,10 +1309,14 @@ if __name__ == "__main__":
                         sigma_blob=sigma_blob,
                         noise_ar_coeff=noise_ar_coeff,
                         centroid_ar_coeff=centroid_ar_coeff,
+                        torus_ratio=torus_ratio,
+                        torus_r2=torus_r2,
                         spatial_bounds=spatial_bounds,
                         hidden_dim=hidden_dim,
+                        ydim=ydim,
                         beta=beta_val,
                         critic=critic,
+                        estimator_compress=estimator_compress,
                         epochs=spec_epochs,
                         batch_size=batch_size,
                         oom_retry_enabled=oom_retry_enabled,
@@ -964,21 +1326,27 @@ if __name__ == "__main__":
                         save_filter_viz=save_filter_viz,
                         filter_layer_idx=filter_layer_idx,
                         filter_out_dir=filter_out_dir,
+                        save_probe_viz=save_probe_viz,
+                        probe_out_dir=probe_out_dir,
                         enable_tensorboard=enable_tensorboard,
                         tensorboard_root_dir=tensorboard_root_dir,
                         mask_eval_threshold=mask_eval_threshold,
                         pi_max_lag=pi_max_lag,
                         pi_lag_agg=pi_lag_agg,
+                        probe_eval_every=probe_eval_every,
                         lr=lr,
+                        mask_logit_lr=mask_logit_lr,
                         early_stop=spec_early_stop,
                         device=device,
                     )
                     rows.append(row)
                     print(
                         f"beta={beta_val:<8g} | seed={seed:>2} | num_noise={num_noise:>3} "
-                        f"| {spec.label:<18} | status={row['status']:<10} "
+                        f"| num_blob={num_blob_val:>3} | {spec.label:<18} | status={row['status']:<10} "
                         f"| batch={row['used_batch_size']:>4} | epochs={spec_epochs:>3} "
-                        f"-> R2_test_mean={row['r2_test_mean']:.3f} "
+                        f"-> R2_pos={row['r2_test_mean']:.3f} "
+                        f"| R2_vel={row['r2_velocity_mean']:.3f} "
+                        f"| R2_noise={row['r2_noise_mean']:.3f} "
                         f"| blob_sel={row['blob_sel_rate']:.2f}"
                     )
                     # Flush after every condition so a wall-clock kill never wipes
@@ -988,6 +1356,46 @@ if __name__ == "__main__":
     save_csv(rows, csv_path)
     print(f"Wrote {csv_path}")
 
-    plot_r2_vs_num_noise(rows, plot_path)
-    print(f"Wrote {plot_path}")
+    # The R2-vs-num_noise sweep plot is only meaningful across multiple noise
+    # levels; with a single noise value (e.g. convergence configs) every encoder
+    # collapses to one dot at the same x, so skip it. The per-epoch learning
+    # curves (plot_convergence_curves.py) are the right diagnostic there.
+    if len(num_noise_values) > 1:
+        plot_r2_vs_num_noise(rows, plot_path)
+        print(f"Wrote {plot_path}")
+        families_noise_path = plot_path.with_name("R2_families_vs_num_noise.png")
+        plot_r2_families_vs_sweep(rows, "num_noise", "Number of noise particles", families_noise_path)
+        print(f"Wrote {families_noise_path}")
+        mi_noise_path = plot_path.with_name("MI_families_vs_num_noise.png")
+        plot_r2_families_vs_sweep(rows, "num_noise", "Number of noise particles", mi_noise_path,
+                                  panels=_MI_FAMILY_PANELS, ylabel="Information (nats)")
+        print(f"Wrote {mi_noise_path}")
+    else:
+        print(
+            f"Skipping {plot_path.name}: single noise value "
+            f"({num_noise_values[0]}) makes the R2-vs-num_noise sweep plot degenerate."
+        )
+
+    # Same panel row against the blob-count axis when num_blob is swept (num_blob=0 is
+    # the no-blob control end): position/velocity R² should rise with coherent signal.
+    if len(num_blob_values) > 1:
+        families_blob_path = plot_path.with_name("R2_families_vs_num_blob.png")
+        plot_r2_families_vs_sweep(rows, "num_blob", "Number of blob particles", families_blob_path)
+        print(f"Wrote {families_blob_path}")
+        mi_blob_path = plot_path.with_name("MI_families_vs_num_blob.png")
+        plot_r2_families_vs_sweep(rows, "num_blob", "Number of blob particles", mi_blob_path,
+                                  panels=_MI_FAMILY_PANELS, ylabel="Information (nats)")
+        print(f"Wrote {mi_blob_path}")
+
+    # Beta axis (log-scaled, geometric ladder): the soft-penalty compression/prediction
+    # tradeoff sweep. Same metric-family + MI/PI panel rows against beta.
+    if len(betas) > 1:
+        families_beta_path = plot_path.with_name("R2_families_vs_beta.png")
+        plot_r2_families_vs_sweep(rows, "beta", r"Compression weight $\beta$",
+                                  families_beta_path, logx=True)
+        print(f"Wrote {families_beta_path}")
+        mi_beta_path = plot_path.with_name("MI_families_vs_beta.png")
+        plot_r2_families_vs_sweep(rows, "beta", r"Compression weight $\beta$", mi_beta_path,
+                                  panels=_MI_FAMILY_PANELS, ylabel="Information (nats)", logx=True)
+        print(f"Wrote {mi_beta_path}")
     

@@ -22,7 +22,13 @@ import os
 # Trajectory factory
 # -----------------------------------------------------------------------------
 
-def _make_centroid(t_max, trajectory, omega, orbit_radius, semi_major, semi_minor, rng=None, centroid_ar_coeff=0.95):
+# Golden ratio: the "most irrational" frequency ratio, so the incommensurate-torus
+# path is maximally non-closing (densest fill of the annulus) for a given r.
+_GOLDEN_RATIO = (1.0 + 5.0 ** 0.5) / 2.0
+
+
+def _make_centroid(t_max, trajectory, omega, orbit_radius, semi_major, semi_minor,
+                   rng=None, centroid_ar_coeff=0.95, torus_ratio=_GOLDEN_RATIO, torus_r2=0.0):
     """Return (centroid_x, centroid_y) arrays of shape (t_max,) for the chosen trajectory."""
     t = np.arange(t_max, dtype=np.float64)
     if trajectory == "circle":
@@ -31,6 +37,19 @@ def _make_centroid(t_max, trajectory, omega, orbit_radius, semi_major, semi_mino
         if semi_major is None or semi_minor is None:
             raise ValueError("semi_major and semi_minor must be specified for trajectory='ellipse'")
         return semi_major * np.cos(omega * t), semi_minor * np.sin(omega * t)
+    elif trajectory == "torus":
+        # Incommensurate 2-torus (epicyclic rosette): a coherent orbit that NEVER closes.
+        #   p(t) = R (cos w1 t, sin w1 t) + r (cos w2 t, sin w2 t),  w2/w1 = torus_ratio
+        # With an irrational ratio (default golden) the path is quasiperiodic and dense in
+        # an annulus. torus_r2 = r = 0 recovers the plain circle (built-in sanity check).
+        # KEY: unlike the circle, velocity is NOT a linear image of position (the path
+        # self-intersects, so a given (x,y) is visited with different velocities), so the
+        # linear velocity probe becomes an INDEPENDENT diagnostic from the position probe.
+        w1 = omega
+        w2 = omega * torus_ratio
+        cx = orbit_radius * np.cos(w1 * t) + torus_r2 * np.cos(w2 * t)
+        cy = orbit_radius * np.sin(w1 * t) + torus_r2 * np.sin(w2 * t)
+        return cx, cy
     elif trajectory == "random_walk":
         if rng is None:
             raise ValueError("rng must be provided for trajectory='random_walk'")
@@ -42,7 +61,9 @@ def _make_centroid(t_max, trajectory, omega, orbit_radius, semi_major, semi_mino
             centroid[t_idx] = centroid_ar_coeff * centroid[t_idx - 1] + rng.normal(0, sigma_c, 2)
         return centroid[:, 0], centroid[:, 1]
     else:
-        raise ValueError(f"Unknown trajectory {trajectory!r}. Choose 'circle', 'ellipse', or 'random_walk'.")
+        raise ValueError(
+            f"Unknown trajectory {trajectory!r}. Choose 'circle', 'ellipse', 'torus', or 'random_walk'."
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -90,6 +111,8 @@ def generate_particle_positions(
     sigma_blob=0.1,
     noise_ar_coeff=0.8,
     centroid_ar_coeff=0.95,
+    torus_ratio=_GOLDEN_RATIO,
+    torus_r2=0.0,
     spatial_bounds=10.0,
     seed=None,
 ):
@@ -105,6 +128,8 @@ def generate_particle_positions(
     trajectory : str
         "circle"  — blob centroid traces r*(cos, sin).
         "ellipse" — blob centroid traces (a*cos, b*sin); requires semi_major and semi_minor.
+        "torus"   — incommensurate 2-torus (epicyclic rosette); non-closing quasiperiodic
+                    orbit. Uses torus_ratio and torus_r2; torus_r2=0 reduces to the circle.
         "random_walk" — blob centroid traces an AR(1) random walk.
     orbit_radius : float
         Radius for circular trajectory.
@@ -119,6 +144,11 @@ def generate_particle_positions(
     centroid_ar_coeff : float
         AR(1) coefficient for the random-walk centroid trajectory (0 ≤ α < 1).
         Stationary std ≈ orbit_radius; ignored for 'circle' and 'ellipse'.
+    torus_ratio : float
+        Frequency ratio ω₂/ω₁ for trajectory='torus' (irrational → non-closing;
+        default golden ratio). Ignored for other trajectories.
+    torus_r2 : float
+        Second (epicycle) radius r for trajectory='torus'. r=0 reduces to the circle.
     spatial_bounds : float
         Half-extent of the simulation plane: [-B, B]^2.
     seed : int or None
@@ -135,6 +165,7 @@ def generate_particle_positions(
     centroid_x, centroid_y = _make_centroid(
         t_max, trajectory, omega, orbit_radius, semi_major, semi_minor,
         rng=rng, centroid_ar_coeff=centroid_ar_coeff,
+        torus_ratio=torus_ratio, torus_r2=torus_r2,
     )
     positions_blob = _run_blob(t_max, centroid_x, centroid_y, num_blob, sigma_blob, rng)
 
@@ -221,6 +252,8 @@ def generate_particle_process_timeseries(
     sigma_blob=0.1,
     noise_ar_coeff=0.8,
     centroid_ar_coeff=0.95,
+    torus_ratio=_GOLDEN_RATIO,
+    torus_r2=0.0,
     spatial_bounds=10.0,
     seed=None,
 ):
@@ -253,6 +286,7 @@ def generate_particle_process_timeseries(
         omega=omega, sigma_blob=sigma_blob,
         noise_ar_coeff=noise_ar_coeff,
         centroid_ar_coeff=centroid_ar_coeff,
+        torus_ratio=torus_ratio, torus_r2=torus_r2,
         spatial_bounds=spatial_bounds,
         seed=seed,
     )
@@ -285,6 +319,8 @@ def animate_particle_dynamics(
     sigma_blob=0.1,
     noise_ar_coeff=0.8,
     centroid_ar_coeff=0.95,
+    torus_ratio=_GOLDEN_RATIO,
+    torus_r2=0.0,
     spatial_bounds=10.0,
     seed=42,
     interval=50,
@@ -296,6 +332,7 @@ def animate_particle_dynamics(
         semi_major=semi_major, semi_minor=semi_minor,
         omega=omega, sigma_blob=sigma_blob,
         noise_ar_coeff=noise_ar_coeff, centroid_ar_coeff=centroid_ar_coeff,
+        torus_ratio=torus_ratio, torus_r2=torus_r2,
         spatial_bounds=spatial_bounds, seed=seed,
     )
 
@@ -348,7 +385,7 @@ def plot_verification_3d(positions, num_blob, num_noise, path=None):
         positions[:, num_blob:, 0].ravel(order="F"),
         positions[:, num_blob:, 1].ravel(order="F"),
         np.repeat(t_axis, num_noise),
-        c="gray", s=2, alpha=0.2, label="random noise",
+        c="gray", s=2, alpha=0.05, label="random noise",
     )
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("t")
     ax.legend()
@@ -365,10 +402,10 @@ if __name__ == "__main__":
     _dir = os.path.dirname(os.path.abspath(__file__))
     ani = animate_particle_dynamics(
         t_max=500, num_blob=30, num_noise=80,
-        trajectory="circle", orbit_radius=3.0, semi_major=2.5, semi_minor=1.5, centroid_ar_coeff=0.95,
+        trajectory="torus", orbit_radius=3.0, semi_major=2.5, semi_minor=1.5, centroid_ar_coeff=0.95, torus_ratio=2.618033988749895, torus_r2=1.5,
         omega=0.05, sigma_blob=0.1,
         noise_ar_coeff=0.8, spatial_bounds=10.0,
         seed=42, interval=50,
     )
-    ani.save(os.path.join(_dir, "particle_circle_process.gif"), fps=20, writer="pillow")
+    #ani.save(os.path.join(_dir, "particle_circle_process.gif"), fps=20, writer="pillow")
     plt.show()
