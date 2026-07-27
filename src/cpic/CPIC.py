@@ -122,14 +122,35 @@ class CPIC(nn.Module):
             critic_params_YX=None,
             hidden_dim=256,
             beta=1e-3, beta1=1.0, beta2=0,
-            device='cuda:0', 
+            device='cuda:0',
             predictive_space="latent",
+            compress_ungated=False,
+            consistency_weight=0.0,
+            beta_warmup_epochs=0,
+            beta_ramp_epochs=0,
             regularization_weight=0
             ):
         super(CPIC, self).__init__()
 
         self.predictive_space = predictive_space
+        # Ungated compression rate: estimate the compression term I(X;Z) from an UNGATED
+        # encoding (FeatureMaskMLP gate forced to all-ones on both _mean and _logvars), so a
+        # collapsing gate can't drive a latent variance to zero and detonate the infonce_upper
+        # density bound. The HARD gate is kept for the predictive term, so interpretability is
+        # preserved. A consistency loss consistency_weight * ||mu_gated - mu_ungated||^2 pulls the
+        # gated encoding toward the (bounded) ungated one. Opt-in, default-off: with
+        # compress_ungated=False the compression term is byte-identical. No-op if deterministic.
+        self.compress_ungated = compress_ungated
+        self.consistency_weight = consistency_weight
         self.beta = beta
+        # Rate warm-up: hold beta=0 for `beta_warmup_epochs` so the latent can bootstrap
+        # I_predictive first (an ever-present compression penalty otherwise deflates the gated
+        # encoder's latent rate to ~0 before it ignites -> collapse), then LINEARLY ramp beta
+        # 0->target over `beta_ramp_epochs`. `self.beta` is the LIVE value fit() mutates each
+        # epoch via _beta_at_epoch; `self._beta_target` is the goal. Both 0 (default) = constant.
+        self._beta_target = beta
+        self.beta_warmup_epochs = int(beta_warmup_epochs)
+        self.beta_ramp_epochs = int(beta_ramp_epochs)
         self.beta1 = beta1
         self.beta2 = beta2
         self.xdim = xdim
@@ -244,8 +265,25 @@ class CPIC(nn.Module):
 
         future_reshaped = X_future.reshape(batch_size, -1)
 
+        L_consist = None
         if self.deterministic:
             I_compress_bound = torch.tensor([0]).to(self.device)
+        elif self.compress_ungated:
+            # Estimate the rate I(X;Z) from an UNGATED encoding (gate forced to all-ones) so a
+            # collapsing FeatureMaskMLP gate can't send a latent variance to 0 and detonate the
+            # infonce_upper density bound. Both the sampled latent AND the decoder re-forward used
+            # inside the estimator are ungated (must match, else the density term scores the gated
+            # mean against ungated samples).
+            ung_past_mean, ung_past_vars = self.encoder(X_past, bypass_mask=True)
+            ung_past = ung_past_mean + torch.sqrt(ung_past_vars) * \
+                       torch.randn(*ung_past_mean.size()).to(self.device)
+            ung_past_reshaped = ung_past.reshape(batch_size, -1)
+            I_compress_bound = estimate_mutual_information(
+                self.mi_params['estimator_compress'], X_past, ung_past_reshaped,
+                decoder=lambda x: self.encoder(x, bypass_mask=True), device=self.device)
+            # Consistency loss: pull the gated encoding toward the (bounded) ungated one, so the
+            # rate computed on the ungated embedding still regularizes the gated one used for prediction.
+            L_consist = ((encoded_past_mean - ung_past_mean) ** 2).mean()
         else:
             I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], X_past,
                                                            encoded_past_reshaped, decoder=self.encoder, device=self.device)
@@ -262,15 +300,16 @@ class CPIC(nn.Module):
         else:
             raise ValueError('The predictive space is not specified.')
 
-        # Compression contribution: fixed-weight penalty (beta * I_compress).
-        compress_term = self.beta * I_compress_bound
-
         if self.beta2 > 0:
             I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
                                                  future_reshaped, critic_fn=self.critic_YX, device=self.device)
-            L = compress_term - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
         else:
-            L = compress_term - self.beta1 * I_predictive_bound
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
+
+        # Consistency loss (opt-in): pull the gated encoding toward the ungated one.
+        if L_consist is not None and self.consistency_weight > 0:
+            L = L + self.consistency_weight * L_consist
 
         if self.regularization_weight > 0:
             weight = self.encoder._mean.weight
@@ -283,6 +322,18 @@ class CPIC(nn.Module):
                                         decoder=self.encoder, device=self.device, debug=debug)
             
         return L, I_compress_bound, I_predictive_bound
+
+
+    def _beta_at_epoch(self, epoch):
+        """Rate-warmup schedule: 0 for the warmup, linear 0->target over the ramp, target after."""
+        w, r = self.beta_warmup_epochs, self.beta_ramp_epochs
+        if w <= 0 and r <= 0:
+            return self._beta_target
+        if epoch < w:
+            return 0.0
+        if r > 0 and epoch < w + r:
+            return self._beta_target * (epoch - w + 1) / r
+        return self._beta_target
 
 
     def encode(self, X):
@@ -474,6 +525,8 @@ class CPIC(nn.Module):
             do_init = False
 
         for epoch in tqdm.tqdm(range(epochs), disable=not verbose):
+            # Rate warm-up: set the live beta for this epoch (no-op when warmup/ramp are 0).
+            self.beta = self._beta_at_epoch(epoch)
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch = [], [], []
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
