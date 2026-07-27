@@ -61,6 +61,7 @@ pip install "cpic[dca]"
   - Data generation script: <code>generate_particle_dynamics.py</code> (circle / ellipse / torus trajectories)
   - Config-driven batch encoder sweep (β sweep, held-out velocity/noise probes, num_blob sweep): <code>run_particle_experiment.py</code>
   - Latent-quality metric plots (position vs velocity vs noise-cloud R² + predictive info): <code>plot_latent_metrics.py</code>
+  - Complexity curve (predictivity vs compression complexity I(X;Z) over the β sweep): <code>plot_complexity_curve.py</code>
   - Convergence curves: <code>plot_convergence_curves.py</code>; re-plot saved CSV results: <code>plot_particle_results.py</code>
   - Probe-result figures (orbit overlay + velocity field): <code>probe_visualization.py</code>
   - Notebook workflows: <code>particle_dynamics.ipynb</code>, <code>conv_physical_analysis.ipynb</code>
