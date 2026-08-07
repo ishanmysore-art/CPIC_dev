@@ -58,11 +58,13 @@ pip install "cpic[dca]"
   - Competitor baselines: <code>real_data_competitors.py</code>
   - Summaries/post-analysis: <code>real_data_summary_standard.py</code>, <code>real_data_summary_standard_beta.py</code>
 - Particle dynamics experiment: <code>experiments/particle_experiment/</code>
-  - Notebook workflow: <code>particle_dynamics.ipynb</code>
-  - Data generation script: <code>generate_particle_dynamics.py</code>
-  - Config-driven batch encoder sweep: <code>run_particle_experiment.py</code>
-  - Re-plot saved CSV results: <code>plot_particle_results.py</code>
-  - ConvPhysical interpretability analysis: <code>conv_physical_analysis.ipynb</code>
+  - Data generation script: <code>generate_particle_dynamics.py</code> (circle / ellipse / torus trajectories)
+  - Config-driven batch encoder sweep (β sweep, held-out velocity/noise probes, num_blob sweep): <code>run_particle_experiment.py</code>
+  - Latent-quality metric plots (position vs velocity vs noise-cloud R² + predictive info): <code>plot_latent_metrics.py</code>
+  - Complexity curve (predictivity vs compression complexity I(X;Z) over the β sweep): <code>plot_complexity_curve.py</code>
+  - Convergence curves: <code>plot_convergence_curves.py</code>; re-plot saved CSV results: <code>plot_particle_results.py</code>
+  - Probe-result figures (orbit overlay + velocity field): <code>probe_visualization.py</code>
+  - Notebook workflows: <code>particle_dynamics.ipynb</code>, <code>conv_physical_analysis.ipynb</code>
 - Video experiment: <code>experiments/video_experiment/</code>
   - Sparse CPIC training/evaluation: <code>run_sparse_cpic.py</code>
   - Train then visualize with one matching <code>--seed</code> / <code>--signature</code>: <code>run_sparse_cpic_train_and_visualize.py</code> (see README, “Train and visualize in one step”)

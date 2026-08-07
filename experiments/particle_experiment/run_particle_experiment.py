@@ -376,25 +376,49 @@ def get_blob_selection_stats(
     particle_labels: np.ndarray,
     particle_order: np.ndarray,
     threshold: float,
-) -> tuple[float, float]:
-    """Fraction of features kept and fraction of *kept* features that are blob.
+) -> tuple[float, float, float, float]:
+    """Gate-selection diagnostics for the FeatureMaskMLP mask.
 
-    Uses deterministic gate probabilities (sigmoid of the learnable logits),
-    matching the notebook's discovery metric. ``blob_sel_rate`` is the precision
-    of the learned mask: of the features it keeps, how many belong to the
-    coherent blob (the interpretability signal of interest).
+    Returns ``(active_frac, blob_sel_rate, gate_selectivity, blob_base_rate)``.
+
+    - ``blob_sel_rate`` is the PRECISION of the mask: of the features whose gate
+      probability clears ``threshold``, the fraction that are blob. It is
+      ``NaN`` when no feature clears the threshold — NOT 0.0. The old ``0.0``
+      convention conflated three very different states ("gate never became
+      confident", "gate at chance", "gate keeps only noise").
+    - ``gate_selectivity = mean(prob|blob) - mean(prob|noise)`` is the honest,
+      THRESHOLD-FREE and BASE-RATE-FREE signal: >0 means the gate genuinely
+      prefers blob features, ~0 means chance, <0 means it prefers noise. Precision
+      alone is base-rate-sensitive (it floats up toward 1.0 as the blob fraction
+      rises even for a chance gate), so it cannot be read without the base rate.
+      Notation: ``prob`` is the per-feature gate probability sigmoid(mask_logit);
+      ``mean(prob|blob)`` is that probability averaged over the subset of features
+      that are blob (the ``|`` reads "restricted to"), and ``mean(prob|noise)``
+      the average over the noise features.
+    - ``blob_base_rate`` is the blob feature fraction (the chance level for
+      precision), so ``blob_sel_rate`` can be read against it.
     """
     probs = get_mask_probs(model)
     if probs is None:
-        return float("nan"), float("nan")
-    active_idx = np.where(probs >= threshold)[0]
-    active_frac = float(active_idx.size / probs.size)
-    if active_idx.size == 0:
-        return active_frac, 0.0
+        return float("nan"), float("nan"), float("nan"), float("nan")
     # Data features are interleaved (x, y) per particle, ordered by particle_order.
     feat_labels = np.repeat(particle_labels[particle_order], 2)
-    blob_sel_rate = float(np.mean(feat_labels[active_idx] == 1))
-    return active_frac, blob_sel_rate
+    blob_base_rate = float(np.mean(feat_labels == 1))
+
+    active_idx = np.where(probs >= threshold)[0]
+    active_frac = float(active_idx.size / probs.size)
+    # NaN (not 0.0) on an empty active set: "nothing cleared the threshold" is not
+    # "kept features are all noise".
+    blob_sel_rate = (
+        float(np.mean(feat_labels[active_idx] == 1)) if active_idx.size > 0 else float("nan")
+    )
+
+    blob_probs = probs[feat_labels == 1]
+    noise_probs = probs[feat_labels == 0]
+    blob_mean = float(np.mean(blob_probs)) if blob_probs.size else float("nan")
+    noise_mean = float(np.mean(noise_probs)) if noise_probs.size else float("nan")
+    gate_selectivity = blob_mean - noise_mean
+    return active_frac, blob_sel_rate, gate_selectivity, blob_base_rate
 
 
 def save_conv_filter_artifacts(
@@ -559,10 +583,14 @@ def log_convergence_epoch(
         blob = probs[feat_labels == 1]
         noise = probs[feat_labels == 0]
         active = probs >= mask_eval_threshold
-        writer.add_scalar("epoch/gate/mean_blob", float(blob.mean()) if blob.size else float("nan"), epoch)
-        writer.add_scalar("epoch/gate/mean_noise", float(noise.mean()) if noise.size else float("nan"), epoch)
+        blob_mean = float(blob.mean()) if blob.size else float("nan")
+        noise_mean = float(noise.mean()) if noise.size else float("nan")
+        writer.add_scalar("epoch/gate/mean_blob", blob_mean, epoch)
+        writer.add_scalar("epoch/gate/mean_noise", noise_mean, epoch)
         writer.add_scalar("epoch/gate/active_frac", float(active.mean()), epoch)
-        blob_sel = float(np.mean(feat_labels[active] == 1)) if active.sum() > 0 else 0.0
+        # Threshold-free, base-rate-free selectivity: >0 = genuine blob preference, ~0 = chance.
+        writer.add_scalar("epoch/gate/selectivity", blob_mean - noise_mean, epoch)
+        blob_sel = float(np.mean(feat_labels[active] == 1)) if active.sum() > 0 else float("nan")
         writer.add_scalar("epoch/gate/blob_sel_rate", blob_sel, epoch)
 
     if probe_eval_every > 0 and (epoch % probe_eval_every == 0 or epoch == total_epochs - 1):
@@ -605,6 +633,10 @@ def run_condition(
     beta: float,
     critic: str,
     estimator_compress: str,
+    compress_ungated: bool,
+    consistency_weight: float,
+    beta_warmup_epochs: int,
+    beta_ramp_epochs: int,
     epochs: int,
     batch_size: int,
     oom_retry_enabled: bool,
@@ -703,6 +735,10 @@ def run_condition(
                 beta=beta,
                 device=device,
                 predictive_space=encoder_spec.predictive_space,
+                compress_ungated=compress_ungated,
+                consistency_weight=consistency_weight,
+                beta_warmup_epochs=beta_warmup_epochs,
+                beta_ramp_epochs=beta_ramp_epochs,
             ).to(device)
             if enable_tensorboard and summary_writer_cls is not None:
                 safe_label = encoder_spec.label.replace(" ", "_").replace("(", "").replace(")", "")
@@ -806,9 +842,11 @@ def run_condition(
     mask_active_frac = float("nan")
     mask_active_indices = ""
     blob_sel_rate = float("nan")
+    gate_selectivity = float("nan")
+    blob_base_rate = float("nan")
     if model is not None and status == "success":
         mask_active_frac, mask_active_indices = get_final_mask_stats(model, mask_eval_threshold)
-        _, blob_sel_rate = get_blob_selection_stats(
+        _, blob_sel_rate, gate_selectivity, blob_base_rate = get_blob_selection_stats(
             model, particle_labels, particle_order, mask_eval_threshold
         )
 
@@ -924,6 +962,8 @@ def run_condition(
         "mask_active_frac": mask_active_frac,
         "mask_active_indices": mask_active_indices,
         "blob_sel_rate": blob_sel_rate,
+        "gate_selectivity": gate_selectivity,
+        "blob_base_rate": blob_base_rate,
         "pi_mean_score": float(np.mean(pi_scores)),
         "pi_max_lag": int(pi_max_lag),
         "pi_lag_agg": pi_lag_agg,
@@ -1226,6 +1266,14 @@ if __name__ == "__main__":
     # KL(encoder || N(0,I))). A lower bound like "infonce_lower" is degenerate to
     # minimize (variances collapse, bound -> -inf).
     estimator_compress = cfg.get("Model", "estimator_compress", fallback="infonce_upper")
+    # Ungated compression rate for the FeatureMaskMLP gate: estimate I(X;Z) from a gate-free
+    # encoding + a consistency loss pulling the gated encoding toward it. Absent = off (default);
+    # every existing config stays byte-identical.
+    compress_ungated = bool_or_default(cfg, "Model", "compress_ungated", False)
+    consistency_weight = float_or_default(cfg, "Model", "consistency_weight", 0.0)
+    # Rate warm-up: beta=0 for beta_warmup_epochs, then linear ramp to target over beta_ramp_epochs.
+    beta_warmup_epochs = int(float_or_default(cfg, "Model", "beta_warmup_epochs", 0))
+    beta_ramp_epochs = int(float_or_default(cfg, "Model", "beta_ramp_epochs", 0))
 
     # Optional beta sweep: if [Sweep] betas is set, loop over those values as the
     # outermost dimension (the "interpretability knob" experiment). Otherwise use
@@ -1317,6 +1365,10 @@ if __name__ == "__main__":
                         beta=beta_val,
                         critic=critic,
                         estimator_compress=estimator_compress,
+                        compress_ungated=compress_ungated,
+                        consistency_weight=consistency_weight,
+                        beta_warmup_epochs=beta_warmup_epochs,
+                        beta_ramp_epochs=beta_ramp_epochs,
                         epochs=spec_epochs,
                         batch_size=batch_size,
                         oom_retry_enabled=oom_retry_enabled,

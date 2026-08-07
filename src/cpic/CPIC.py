@@ -89,11 +89,32 @@ class CPIC(nn.Module):
         Device to use. The default is 'cuda:0'.
     predictive_space : str, optional
         Predictive space, either 'latent' or 'observation'. The default is 'latent'.
+    compress_ungated : bool, optional
+        Estimate the compression term I(X;Z) from an UNGATED encoding (FeatureMaskMLP
+        gate forced to all-ones on both the mean and variance heads), so a collapsing
+        gate cannot drive a latent variance to zero and destabilize the infonce_upper
+        bound. The hard gate is still used for the predictive term, preserving
+        interpretability. No effect for non-gated or deterministic encoders.
+        The default is False (compression term unchanged).
+    consistency_weight : float, optional
+        Weight of the consistency penalty ||mu_gated - mu_ungated||^2 added to the
+        loss when compress_ungated=True, pulling the gated encoding toward the
+        bounded ungated one. The default is 0.
+    beta_warmup_epochs : int, optional
+        Number of initial epochs with beta held at 0, letting the latent bootstrap
+        predictive structure before compression pressure is applied. The default is 0.
+    beta_ramp_epochs : int, optional
+        Number of epochs over which beta increases linearly from 0 to its target
+        value after the warm-up. The default is 0 (jump straight to the target).
     regularization_weight : float, optional
         Weight for regularization term. The default is 0.
 
     Attributes
     ----------
+    beta : float
+        Live compression weight used by the loss. When a warm-up/ramp schedule is
+        set, fit() updates it each epoch via _beta_at_epoch toward the constructor
+        value (kept as _beta_target); with no schedule it stays constant.
     encoder : nn.Module
         Encoder network.
     critic : nn.Module
@@ -122,14 +143,23 @@ class CPIC(nn.Module):
             critic_params_YX=None,
             hidden_dim=256,
             beta=1e-3, beta1=1.0, beta2=0,
-            device='cuda:0', 
+            device='cuda:0',
             predictive_space="latent",
+            compress_ungated=False,
+            consistency_weight=0.0,
+            beta_warmup_epochs=0,
+            beta_ramp_epochs=0,
             regularization_weight=0
             ):
         super(CPIC, self).__init__()
 
         self.predictive_space = predictive_space
+        self.compress_ungated = compress_ungated
+        self.consistency_weight = consistency_weight
         self.beta = beta
+        self._beta_target = beta
+        self.beta_warmup_epochs = int(beta_warmup_epochs)
+        self.beta_ramp_epochs = int(beta_ramp_epochs)
         self.beta1 = beta1
         self.beta2 = beta2
         self.xdim = xdim
@@ -244,8 +274,25 @@ class CPIC(nn.Module):
 
         future_reshaped = X_future.reshape(batch_size, -1)
 
+        L_consist = None
         if self.deterministic:
             I_compress_bound = torch.tensor([0]).to(self.device)
+        elif self.compress_ungated:
+            # Estimate the rate I(X;Z) from an UNGATED encoding (gate forced to all-ones) so a
+            # collapsing FeatureMaskMLP gate can't send a latent variance to 0 and detonate the
+            # infonce_upper density bound. Both the sampled latent AND the decoder re-forward used
+            # inside the estimator are ungated (must match, else the density term scores the gated
+            # mean against ungated samples).
+            ung_past_mean, ung_past_vars = self.encoder(X_past, bypass_mask=True)
+            ung_past = ung_past_mean + torch.sqrt(ung_past_vars) * \
+                       torch.randn(*ung_past_mean.size()).to(self.device)
+            ung_past_reshaped = ung_past.reshape(batch_size, -1)
+            I_compress_bound = estimate_mutual_information(
+                self.mi_params['estimator_compress'], X_past, ung_past_reshaped,
+                decoder=lambda x: self.encoder(x, bypass_mask=True), device=self.device)
+            # Consistency loss: pull the gated encoding toward the (bounded) ungated one, so the
+            # rate computed on the ungated embedding still regularizes the gated one used for prediction.
+            L_consist = ((encoded_past_mean - ung_past_mean) ** 2).mean()
         else:
             I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], X_past,
                                                            encoded_past_reshaped, decoder=self.encoder, device=self.device)
@@ -262,15 +309,16 @@ class CPIC(nn.Module):
         else:
             raise ValueError('The predictive space is not specified.')
 
-        # Compression contribution: fixed-weight penalty (beta * I_compress).
-        compress_term = self.beta * I_compress_bound
-
         if self.beta2 > 0:
             I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
                                                  future_reshaped, critic_fn=self.critic_YX, device=self.device)
-            L = compress_term - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
         else:
-            L = compress_term - self.beta1 * I_predictive_bound
+            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
+
+        # Consistency loss (opt-in): pull the gated encoding toward the ungated one.
+        if L_consist is not None and self.consistency_weight > 0:
+            L = L + self.consistency_weight * L_consist
 
         if self.regularization_weight > 0:
             weight = self.encoder._mean.weight
@@ -283,6 +331,18 @@ class CPIC(nn.Module):
                                         decoder=self.encoder, device=self.device, debug=debug)
             
         return L, I_compress_bound, I_predictive_bound
+
+
+    def _beta_at_epoch(self, epoch):
+        """Rate-warmup schedule: 0 for the warmup, linear 0->target over the ramp, target after."""
+        w, r = self.beta_warmup_epochs, self.beta_ramp_epochs
+        if w <= 0 and r <= 0:
+            return self._beta_target
+        if epoch < w:
+            return 0.0
+        if r > 0 and epoch < w + r:
+            return self._beta_target * (epoch - w + 1) / r
+        return self._beta_target
 
 
     def encode(self, X):
@@ -474,6 +534,8 @@ class CPIC(nn.Module):
             do_init = False
 
         for epoch in tqdm.tqdm(range(epochs), disable=not verbose):
+            # Rate warm-up: set the live beta for this epoch (no-op when warmup/ramp are 0).
+            self.beta = self._beta_at_epoch(epoch)
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch = [], [], []
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
