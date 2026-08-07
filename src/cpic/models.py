@@ -610,9 +610,16 @@ class FeatureMaskMLPEncoder(nn.Module):
         # Straight-through estimator: in forward use hard, in backward use probs.
         return hard + (probs - probs.detach())
 
-    def forward(self, x):
-        # Match mask dtype/device to input and broadcast across batch/time.
-        mask = self.get_feature_mask().to(dtype=x.dtype, device=x.device)
+    def forward(self, x, bypass_mask=False):
+        # bypass_mask=True forces the gate to all-ones (ungated encoding), used to
+        # compute the compression term from a gate-free embedding so a collapsing gate
+        # cannot drive a latent dim's variance to zero (the infonce_upper rate
+        # detonation). Prediction still calls forward() with the gate on.
+        if bypass_mask:
+            mask = torch.ones(self.input_dim, dtype=x.dtype, device=x.device)
+        else:
+            # Match mask dtype/device to input and broadcast across batch/time.
+            mask = self.get_feature_mask().to(dtype=x.dtype, device=x.device)
         if x.ndim == 3:
             # x: (batch, time, features)
             x_masked = x * mask.view(1, 1, -1)
@@ -900,7 +907,18 @@ class StructuredEncoder(nn.Module):
         else:
             self._logvars = factory(input_dim, hidden_dim, output_dim, T=T, **encoder_kwargs)
 
-    def forward(self, x):
+    @staticmethod
+    def _apply_sub(sub, x, bypass_mask):
+        # Call a sub-encoder, forwarding bypass_mask only to gate-capable encoders
+        # (FeatureMaskMLPEncoder). Other encoder types have no gate, so bypass is a no-op
+        # and their forward() signature doesn't accept the kwarg.
+        if bypass_mask and isinstance(sub, FeatureMaskMLPEncoder):
+            return sub(x, bypass_mask=True)
+        return sub(x)
+
+    def forward(self, x, bypass_mask=False):
+        # bypass_mask=True forces the FeatureMaskMLP gate(s) to all-ones on BOTH _mean and
+        # _logvars, yielding an ungated encoding used for the compression-rate estimate.
         # handle input shape for conv vs mlp
         if self._input_shape == "conv" and not self.linear_encoder:
             # for conv, input should be (batch, 1, features, time))
@@ -908,12 +926,12 @@ class StructuredEncoder(nn.Module):
         else:
             # for mlp or linear encoding, no shape transformation needed
             x_processed = x
-            
-        encoded_mean = self._mean(x_processed)
+
+        encoded_mean = self._apply_sub(self._mean, x_processed, bypass_mask)
         if self.deterministic:
             encoded_vars = torch.exp(self._logvars(encoded_mean.shape))
         else:
-            encoded_vars = torch.exp(self._logvars(x_processed))
+            encoded_vars = torch.exp(self._apply_sub(self._logvars, x_processed, bypass_mask))
             # encoded_vars = nn.functional.softplus(self._logvars(x_processed))
         return encoded_mean, encoded_vars
 
