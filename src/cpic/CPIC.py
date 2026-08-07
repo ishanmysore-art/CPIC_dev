@@ -89,11 +89,32 @@ class CPIC(nn.Module):
         Device to use. The default is 'cuda:0'.
     predictive_space : str, optional
         Predictive space, either 'latent' or 'observation'. The default is 'latent'.
+    compress_ungated : bool, optional
+        Estimate the compression term I(X;Z) from an UNGATED encoding (FeatureMaskMLP
+        gate forced to all-ones on both the mean and variance heads), so a collapsing
+        gate cannot drive a latent variance to zero and destabilize the infonce_upper
+        bound. The hard gate is still used for the predictive term, preserving
+        interpretability. No effect for non-gated or deterministic encoders.
+        The default is False (compression term unchanged).
+    consistency_weight : float, optional
+        Weight of the consistency penalty ||mu_gated - mu_ungated||^2 added to the
+        loss when compress_ungated=True, pulling the gated encoding toward the
+        bounded ungated one. The default is 0.
+    beta_warmup_epochs : int, optional
+        Number of initial epochs with beta held at 0, letting the latent bootstrap
+        predictive structure before compression pressure is applied. The default is 0.
+    beta_ramp_epochs : int, optional
+        Number of epochs over which beta increases linearly from 0 to its target
+        value after the warm-up. The default is 0 (jump straight to the target).
     regularization_weight : float, optional
         Weight for regularization term. The default is 0.
 
     Attributes
     ----------
+    beta : float
+        Live compression weight used by the loss. When a warm-up/ramp schedule is
+        set, fit() updates it each epoch via _beta_at_epoch toward the constructor
+        value (kept as _beta_target); with no schedule it stays constant.
     encoder : nn.Module
         Encoder network.
     critic : nn.Module
@@ -133,21 +154,9 @@ class CPIC(nn.Module):
         super(CPIC, self).__init__()
 
         self.predictive_space = predictive_space
-        # Ungated compression rate: estimate the compression term I(X;Z) from an UNGATED
-        # encoding (FeatureMaskMLP gate forced to all-ones on both _mean and _logvars), so a
-        # collapsing gate can't drive a latent variance to zero and detonate the infonce_upper
-        # density bound. The HARD gate is kept for the predictive term, so interpretability is
-        # preserved. A consistency loss consistency_weight * ||mu_gated - mu_ungated||^2 pulls the
-        # gated encoding toward the (bounded) ungated one. Opt-in, default-off: with
-        # compress_ungated=False the compression term is byte-identical. No-op if deterministic.
         self.compress_ungated = compress_ungated
         self.consistency_weight = consistency_weight
         self.beta = beta
-        # Rate warm-up: hold beta=0 for `beta_warmup_epochs` so the latent can bootstrap
-        # I_predictive first (an ever-present compression penalty otherwise deflates the gated
-        # encoder's latent rate to ~0 before it ignites -> collapse), then LINEARLY ramp beta
-        # 0->target over `beta_ramp_epochs`. `self.beta` is the LIVE value fit() mutates each
-        # epoch via _beta_at_epoch; `self._beta_target` is the goal. Both 0 (default) = constant.
         self._beta_target = beta
         self.beta_warmup_epochs = int(beta_warmup_epochs)
         self.beta_ramp_epochs = int(beta_ramp_epochs)
