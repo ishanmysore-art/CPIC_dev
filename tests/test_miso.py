@@ -123,6 +123,31 @@ def test_latent_space_dim_mismatch_raises():
         model(past, future)
 
 
+def test_fit_mimo_observation_space():
+    # "Single-output" is the motivating case, not a restriction: any N_out
+    # works in observation space (MIMO).
+    n_out = 5
+    inp, out = make_trial(60, n_out=n_out)
+    ds = InputOutputPastFutureDataset([inp], [out], window_size=W)
+    model = CPIC(
+        ydim=YDIM,
+        T=W,
+        xdim=N_IN,
+        predictive_space="observation",
+        critic_params={"x_dim": W * YDIM, "y_dim": W * n_out, "hidden_dim": 16},
+        hidden_dim=16,
+        beta2=0,
+        device="cpu",
+        encoder_params={"encoder_type": "mlp", "n_layers": 1, "activation": "relu"},
+    )
+    model.fit(ds, epochs=2, batch_size=8, lr=1e-3, verbose=False)
+
+    past = torch.randn(5, W, N_IN)
+    future = torch.randn(5, W, n_out)
+    loss, _, _ = model(past, future)
+    assert torch.isfinite(loss)
+
+
 def test_baseline_sized_from_critic_y_dim():
     model = make_miso_model(
         "observation", mi_params={"baseline": "unnormalized"}
