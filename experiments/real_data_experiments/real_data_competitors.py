@@ -1,15 +1,26 @@
+from pathlib import Path
+
 import numpy as np
 import pickle
 
-from dca import analysis, data_util
+from dca import analysis
+from cpic.exp_utils import data_util
 
-M1 = data_util.load_sabes_data('/home/rui/Data/M1/indy_20160627_01.mat')
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def data_path(*parts):
+    """Resolve ``data/real_data/...`` paths from the repository root."""
+    return str(REPO_ROOT.joinpath(*parts))
+
+
+M1 = data_util.load_sabes_data(data_path('data', 'real_data', 'M1', 'indy_20160627_01.mat'))
 print("m1, input dim={}".format(M1['M1'].shape[-1]))
-HC = data_util.load_kording_paper_data('/home/rui/Data/HC/example_data_hc.pickle')
+HC = data_util.load_kording_paper_data(data_path('data', 'real_data', 'HC', 'example_data_hc.pickle'))
 print("hc, input dim={}".format(HC['neural'].shape[-1]))
-weather = data_util.load_weather_data('/home/rui/Data/TEMP/temperature.csv')
+weather = data_util.load_weather_data(data_path('data', 'real_data', 'TEMP', 'temperature.csv'))
 print("temp, input dim={}".format(weather.shape[-1]))
-ms = data_util.load_accel_data('/home/rui/Data/motion_sense/A_DeviceMotion_data/std_6/sub_19.csv')
+ms = data_util.load_accel_data(data_path('data', 'real_data', 'motion_sense', 'A_DeviceMotion_data', 'std_6', 'sub_19.csv'))
 print("ms, input dim={}".format(ms.shape[-1]))
 
 
