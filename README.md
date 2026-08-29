@@ -86,6 +86,30 @@ CPIC supports multiple encoder architectures via <code>encoder_params["encoder_t
 
 Pass <code>encoder_params</code> when constructing CPIC, and when calling <code>fit()</code> the encoder is built from the registry.
 
+### Predictive loss: MI vs reconstruction
+
+By default CPIC maximizes predictive information via a mutual-information lower bound (<code>predictive_loss="mi"</code>). You can replace that term with MSE reconstruction from the past latent <code>Z_past</code> using a <code>StructuredDecoder</code> that mirrors the encoder architecture (same <code>encoder_type</code>, swapped input/output dims):
+
+```python
+from cpic import CPIC
+
+model = CPIC(
+    ydim=5,
+    xdim=55,
+    T=4,
+    predictive_loss="reconstruction",
+    reconstruction_targets=("past",),  # or ("past", "future")
+    encoder_params={"encoder_type": "linear", "deterministic": True},
+    mi_params={"estimator_compress": "vub"},
+)
+```
+
+- <code>predictive_loss="reconstruction"</code> — objective adds <code>beta1 * reconstruction_loss</code> (minimize decode error) instead of <code>-beta1 * I_predictive</code>.
+- <code>predictive_loss="none"</code> — compression-only training (no PI / reconstruction term).
+- <code>reconstruction_targets</code> — default <code>("past",)</code> decodes <code>Z_past → X_past</code>; include <code>"future"</code> to also decode <code>Z_past → X_future</code>.
+
+HC real-data example config: <code>experiments/real_data_experiments/config/config_hc_reconstruction_alt.ini</code> (run with <code>--config hc_reconstruction_alt</code> from <code>experiments/real_data_experiments/</code>).
+
 ## Configuration
 Experiment configurations are grouped under:
 - <code>experiments/synthetic_lorenz_experiment/config/</code>

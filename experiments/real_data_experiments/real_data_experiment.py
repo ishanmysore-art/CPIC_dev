@@ -8,8 +8,8 @@ from dca import data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
-from synthetic.utils.data_util import CrossValidate
-from synthetic.utils.cov_util import form_lag_matrix
+from cpic.exp_utils.data_util import CrossValidate
+from cpic.exp_utils.cov_util import form_lag_matrix
 import pickle
 
 
@@ -275,23 +275,20 @@ if __name__ == "__main__":
 
     if args.config == "m1_stochastic_infonce" or args.config == "m1_stochastic_infonce_alt" \
             or args.config == "m1_deterministic_infonce_alt":
-        # M1 = data_util.load_sabes_data('/home/fan/Data/M1/indy_20160627_01.mat')
-        M1 = data_util.load_sabes_data('/home/rui/Data/M1/indy_20160627_01.mat')
+        M1 = data_util.load_sabes_data('data/real_data/M1/indy_20160627_01.mat')
         X, Y = M1['M1'], M1['cursor']
         good_ts = None
     if args.config == "hc_stochastic_infonce" or args.config == "hc_stochastic_infonce_alt"\
             or args.config == "hc_deterministic_infonce_alt":
-        # HC = data_util.load_kording_paper_data('/home/fan/Data/HC/example_data_hc.pickle')
-        HC = data_util.load_kording_paper_data('/home/rui/Data/HC/example_data_hc.pickle')
+        HC = data_util.load_kording_paper_data('data/real_data/HC/example_data_hc.pickle')
         X, Y = HC['neural'], HC['loc']
         good_ts = 22000
     if args.config == "temp_stochastic_infonce" or args.config == "temp_stochastic_infonce_alt":
-        # weather = data_util.load_weather_data('/home/fan/Data/TEMP/temperature.csv')
-        weather = data_util.load_weather_data('/home/rui/Data/TEMP/temperature.csv')
+        weather = data_util.load_weather_data('data/real_data/TEMP/temperature.csv')
         X, Y = weather, weather
         good_ts = None
     if args.config == "ms_stochatic_infonce" or args.config == "ms_stochastic_infonce_alt":
-        ms = data_util.load_accel_data('/home/rui/Data/motion_sense/A_DeviceMotion_data/std_6/sub_19.csv')
+        ms = data_util.load_accel_data('data/real_data/motion_sense/A_DeviceMotion_data/std_6/sub_19.csv')
         X, Y = ms, ms
         good_ts = None
 

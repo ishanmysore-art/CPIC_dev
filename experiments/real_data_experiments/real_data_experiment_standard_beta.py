@@ -9,7 +9,7 @@ from dca import data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
-from synthetic.utils.cov_util import form_lag_matrix
+from cpic.exp_utils.cov_util import form_lag_matrix
 import pickle
 
 

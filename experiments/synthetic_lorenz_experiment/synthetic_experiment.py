@@ -10,11 +10,11 @@ python synthetic_experiment.py --config lorenz_stochastic_infonce_demo
 from cpic import CPIC
 from cpic.utils.data import PastFutureDataset
 from cpic.utils.helpers import DCA_init
-from utils.data_util import linear_alignment, compute_R2
+from cpic.exp_utils.data_util import linear_alignment, compute_R2
 import torch
 from tensorboardX import SummaryWriter
 import h5py
-from utils.plot_util import plot_lorenz_3d_colored
+from cpic.exp_utils.plot_util import plot_lorenz_3d_colored
 import matplotlib.pyplot as plt
 from configparser import ConfigParser
 import argparse
