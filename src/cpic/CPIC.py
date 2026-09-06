@@ -113,6 +113,9 @@ class CPIC(nn.Module):
     reconstruction_targets : tuple, optional
         When ``predictive_loss="reconstruction"``, which targets to decode from
         ``Z_past``: ``("past",)`` (default), ``("future",)``, or ``("past", "future")``.
+        Past MSE is weighted by ``beta1``. Future MSE is the reconstruction stand-in for
+        future dependence: weighted by ``beta2`` when ``beta2 > 0``, otherwise by ``beta1``
+        (and averaged with past when both targets are set and ``beta2 == 0``).
     future_xdim : int, optional
         Output dimension for future reconstruction when it differs from ``xdim``.
         Inferred from data in ``fit()`` when unset.
@@ -308,18 +311,28 @@ class CPIC(nn.Module):
                 )
                 self.decoder_future.to(self.device)
 
-    def _compute_reconstruction_loss(self, encoded_past, X_past, X_future):
-        """MSE reconstruction from past latent Z_past to configured targets."""
-        terms = []
+    def _compute_reconstruction_losses(self, encoded_past, X_past, X_future):
+        """MSE reconstruction from past latent Z_past to configured targets.
+
+        Returns
+        -------
+        past_loss : torch.Tensor or None
+            MSE(Z_past → X_past) when ``"past"`` is in ``reconstruction_targets``.
+        future_loss : torch.Tensor or None
+            MSE(Z_past → X_future) when ``"future"`` is in ``reconstruction_targets``.
+            This is the reconstruction stand-in for future dependence I(Y; X_future).
+        """
+        past_loss = None
+        future_loss = None
         if "past" in self.reconstruction_targets:
             decoded_past = self.decoder_past(encoded_past)
-            terms.append(torch.mean((decoded_past - X_past) ** 2))
+            past_loss = torch.mean((decoded_past - X_past) ** 2)
         if "future" in self.reconstruction_targets:
             decoded_future = self.decoder_future(encoded_past)
-            terms.append(torch.mean((decoded_future - X_future) ** 2))
-        if not terms:
+            future_loss = torch.mean((decoded_future - X_future) ** 2)
+        if past_loss is None and future_loss is None:
             raise ValueError("reconstruction_targets must include 'past' and/or 'future'.")
-        return sum(terms) / len(terms)
+        return past_loss, future_loss
 
 
     def forward(self, X_past, X_future, debug=False):
@@ -341,9 +354,9 @@ class CPIC(nn.Module):
             CPIC loss.
         I_compress_bound : torch.Tensor
             Estimated compression mutual information bound.
-        I_predictive_bound : torch.Tensor
-            Estimated predictive mutual information bound, or reconstruction loss when
-            ``predictive_loss='reconstruction'``, or zero when ``predictive_loss='none'``.
+        predictive_metric : torch.Tensor
+            ``I_predictive_bound`` when ``predictive_loss='mi'``, ``I_reconstruction``
+            when ``predictive_loss='reconstruction'``, or zero when ``predictive_loss='none'``.
         """
         batch_size = X_past.shape[0]
 
@@ -395,6 +408,10 @@ class CPIC(nn.Module):
             I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], X_past,
                                                            encoded_past_reshaped, decoder=self.encoder, device=self.device)
 
+        I_predictive_bound = None
+        I_reconstruction = None
+        recon_past_loss = None
+        recon_future_loss = None
         if self.predictive_loss == "mi":
             if self.predictive_space == "latent":
                 I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
@@ -408,26 +425,47 @@ class CPIC(nn.Module):
                                                                  baseline_fn=self.baseline, device=self.device)
             else:
                 raise ValueError('The predictive space is not specified.')
+            predictive_metric = I_predictive_bound
         elif self.predictive_loss == "reconstruction":
             if self.decoder_past is None and self.decoder_future is None:
                 self._init_decoders(future_xdim=X_future.shape[-1])
-            I_predictive_bound = self._compute_reconstruction_loss(encoded_past, X_past, X_future)
+            recon_past_loss, recon_future_loss = self._compute_reconstruction_losses(
+                encoded_past, X_past, X_future)
+            recon_terms = [t for t in (recon_past_loss, recon_future_loss) if t is not None]
+            I_reconstruction = sum(recon_terms) / len(recon_terms)
+            predictive_metric = I_reconstruction
         else:
-            I_predictive_bound = torch.tensor(0.0, device=self.device)
+            predictive_metric = torch.tensor(0.0, device=self.device)
 
-        if self.beta2 > 0:
+        # Future dependence I(Y; X_future):
+        # - MI mode (and recon without a future target): maximize InfoNCE lower bound → subtract.
+        # - Reconstruction with "future" target: minimize MSE(Z_past → X_future) → add; skip I_YX.
+        use_recon_future_dependence = recon_future_loss is not None
+        if self.beta2 > 0 and not use_recon_future_dependence:
             I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
                                                  future_reshaped, critic_fn=self.critic_YX, device=self.device)
             if self.predictive_loss == "mi":
                 L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
             elif self.predictive_loss == "reconstruction":
-                L = self.beta * I_compress_bound + self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+                L = self.beta * I_compress_bound + self.beta1 * I_reconstruction - self.beta2 * I_YX_bound
             else:
                 L = self.beta * I_compress_bound - self.beta2 * I_YX_bound
         elif self.predictive_loss == "mi":
             L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
         elif self.predictive_loss == "reconstruction":
-            L = self.beta * I_compress_bound + self.beta1 * I_predictive_bound
+            L = self.beta * I_compress_bound
+            if recon_past_loss is not None and recon_future_loss is not None and self.beta2 > 0:
+                # Split: past recon under beta1; future dependence under beta2.
+                L = L + self.beta1 * recon_past_loss + self.beta2 * recon_future_loss
+            elif recon_past_loss is not None and recon_future_loss is not None:
+                # Both targets, no beta2: average under beta1 (same scale as a single target).
+                L = L + self.beta1 * I_reconstruction
+            elif recon_past_loss is not None:
+                L = L + self.beta1 * recon_past_loss
+            else:
+                # Future-only: beta2 when set, otherwise beta1.
+                future_weight = self.beta2 if self.beta2 > 0 else self.beta1
+                L = L + future_weight * recon_future_loss
         else:
             L = self.beta * I_compress_bound
 
@@ -444,8 +482,8 @@ class CPIC(nn.Module):
         if debug:
             estimate_mutual_information(self.mi_params['estimator_compress'], X_past, encoded_past_reshaped,
                                         decoder=self.encoder, device=self.device, debug=debug)
-            
-        return L, I_compress_bound, I_predictive_bound
+
+        return L, I_compress_bound, predictive_metric
 
 
     def _beta_at_epoch(self, epoch):
