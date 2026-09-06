@@ -2,7 +2,7 @@ import pickle
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-from utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
+from cpic.exp_utils.plot_util import plot_lorenz_3d, plot_lorenz_3d_colored
 from synthetic_experiment import plot_latent_trials
 import argparse
 linewidth_3d = 0.5

@@ -981,6 +981,72 @@ class StructuredEncoder(nn.Module):
         return x_processed
 
 
+class StructuredDecoder(nn.Module):
+    """
+    Deterministic decoder mirroring :class:`StructuredEncoder` architecture.
+
+    Maps latent sequences (T x ydim) back to observations (T x output_dim) using
+    the same encoder registry factories with swapped input/output dimensions.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        T=4,
+        encoder_type="mlp",
+        n_layers=1,
+        activation="relu",
+        conv_kernel_size=3,
+        conv_stride=1,
+        conv_padding=1,
+        **extra_encoder_kwargs,
+    ):
+        super(StructuredDecoder, self).__init__()
+
+        encoder_kwargs = {
+            "n_layers": n_layers,
+            "activation": activation,
+            "conv_kernel_size": conv_kernel_size,
+            "conv_stride": conv_stride,
+            "conv_padding": conv_padding,
+        }
+        encoder_kwargs.update(extra_encoder_kwargs)
+
+        if encoder_type not in ENCODERS:
+            raise ValueError(
+                f"Unknown encoder_type: {encoder_type}. Available types: {list(ENCODERS.keys())}"
+            )
+
+        self.encoder_type = encoder_type
+        self.linear_encoder = encoder_type == "linear"
+        self._input_shape = ENCODER_INPUT_SHAPE.get(encoder_type, "flat")
+
+        factory = ENCODERS[encoder_type]
+        if encoder_type == "conv_spatiotemporal":
+            self._decoder = factory(input_dim, hidden_dim, output_dim, T=T, **encoder_kwargs)
+        else:
+            self._decoder = factory(input_dim, hidden_dim, output_dim, T=None, **encoder_kwargs)
+
+    @staticmethod
+    def _reshape_for_conv(x):
+        if x.ndim == 2:
+            x_processed = x.unsqueeze(1)
+        else:
+            x_processed = x
+        x_processed = x_processed.permute(0, 2, 1)
+        x_processed = x_processed.unsqueeze(1)
+        return x_processed
+
+    def forward(self, z):
+        if self._input_shape == "conv" and not self.linear_encoder:
+            z_processed = self._reshape_for_conv(z)
+        else:
+            z_processed = z
+        return self._decoder(z_processed)
+
+
 """
 Critics
 """

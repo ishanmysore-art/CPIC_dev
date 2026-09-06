@@ -70,8 +70,8 @@ def load_kording_paper_data(filename, bin_width_s=0.05, min_spike_count=10, prep
     with open(filename, "rb") as fname:
         data = pickle.load(fname)
     X, Y = data[0], data[1]
-    good_X_idx = (1 - (np.isnan(X[:, 0]) + np.isnan(X[:, 1]))).astype(np.bool)
-    good_Y_idx = (1 - (np.isnan(Y[:, 0]) + np.isnan(Y[:, 1]))).astype(np.bool)
+    good_X_idx = (1 - (np.isnan(X[:, 0]) + np.isnan(X[:, 1]))).astype(bool)
+    good_Y_idx = (1 - (np.isnan(Y[:, 0]) + np.isnan(Y[:, 1]))).astype(bool)
     good_idx = good_X_idx * good_Y_idx
     X, Y = X[good_idx], Y[good_idx]
     chunk_size = int(np.round(bin_width_s / 0.05))  # 50 ms default bin width
@@ -139,7 +139,7 @@ def load_sabes_data(filename, bin_width_s=.05, preprocess=True):
             d = n_channels * n_sorted_units
             max_t = t[-1]
             n_bins = int(np.floor((max_t - t[0]) / bin_width_s))
-            binned_spikes = np.zeros((n_bins, d), dtype=np.int)
+            binned_spikes = np.zeros((n_bins, d), dtype=np.int_)
             for chan_idx in indices:
                 for unit_idx in range(1, n_sorted_units):  # ignore hash!
                     spike_times = f[f["spikes"][unit_idx, chan_idx]][()]
@@ -149,7 +149,7 @@ def load_sabes_data(filename, bin_width_s=.05, preprocess=True):
                     spike_times = spike_times[0, :]
                     # get rid of extraneous t vals
                     spike_times = spike_times[spike_times - t[0] < n_bins * bin_width_s]
-                    bin_idx = np.floor((spike_times - t[0]) / bin_width_s).astype(np.int)
+                    bin_idx = np.floor((spike_times - t[0]) / bin_width_s).astype(np.int_)
                     unique_idxs, counts = np.unique(bin_idx, return_counts=True)
                     # make sure to ignore the hash here...
                     binned_spikes[unique_idxs, chan_idx * n_sorted_units + unit_idx - 1] += counts

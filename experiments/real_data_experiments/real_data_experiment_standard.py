@@ -1,15 +1,22 @@
 import argparse
 from configparser import ConfigParser
 import os
+from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
-from dca import data_util
+from cpic.exp_utils import data_util
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
-from synthetic.utils.cov_util import form_lag_matrix
+from cpic.exp_utils.cov_util import form_lag_matrix
 import pickle
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def data_path(*parts):
+    """Resolve ``data/real_data/...`` paths from the repository root."""
+    return str(REPO_ROOT.joinpath(*parts))
 
 
 class myconf(ConfigParser):
@@ -98,7 +105,8 @@ def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset
 
 def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       n_init=1, verbose=False, Kernel=None, xdim=None, beta=1e-3, beta1=1, beta2=0, good_ts=None,
-                      standardize_Y=False, train_test_ratio=0.8, regularization_weight=0):
+                      standardize_Y=False, train_test_ratio=0.8, regularization_weight=0,
+                      predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent"):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -160,6 +168,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
             T_pi = T_pi_vals[T_pi_idx]
             critic_params = {"x_dim": T_pi * ydim, "y_dim": T_pi * ydim, "hidden_dim": hidden_dim}
             critic_params_YX = {"x_dim": T_pi * ydim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim}
+            if predictive_loss == "mi" and predictive_space == "observation":
+                critic_params = {"x_dim": T_pi * ydim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim}
             # train data
             if do_dca_init:
                 init_weights = DCA_init(np.concatenate(X_train_ctd, axis=0), T=T_pi, d=dim, n_init=n_init)
@@ -167,24 +177,54 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 init_weights = None
 
             train_data = PastFutureDataset(X_train_ctd, window_size=T_pi)
-            train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
-            # import pdb; pdb.set_trace()
-            CPIC, I_compress, I_predictive = train_CPIC(beta, xdim, dim, mi_params, critic_params, baseline_params, num_epochs,
-                              train_dataloader, T=T_pi,
-                              signature=args.config, deterministic=deterministic, init_weights=init_weights, lr=lr,
-                              num_early_stop=num_early_stop, device=device, beta1=beta1, beta2=beta2,
-                              critic_params_YX=critic_params_YX, regularization_weight=regularization_weight,
-                              return_mutual_information=True)
-            CPIC = CPIC.to(device)
+            encoder_params = {"deterministic": deterministic}
+            if kernel == "Linear":
+                encoder_params["encoder_type"] = "linear"
+            else:
+                encoder_params["encoder_type"] = "mlp"
+
+            cpic_kwargs = {
+                "ydim": dim,
+                "xdim": xdim,
+                "T": T_pi,
+                "mi_params": mi_params,
+                "baseline_params": baseline_params,
+                "encoder_params": encoder_params,
+                "hidden_dim": hidden_dim,
+                "beta": beta,
+                "beta1": beta1,
+                "beta2": beta2,
+                "device": device,
+                "predictive_space": predictive_space,
+                "predictive_loss": predictive_loss,
+                "reconstruction_targets": reconstruction_targets,
+                "regularization_weight": regularization_weight,
+            }
+            if predictive_loss == "mi":
+                cpic_kwargs["critic_params"] = critic_params
+                if beta2 > 0:
+                    cpic_kwargs["critic_params_YX"] = critic_params_YX
+
+            CPIC_model = CPIC(**cpic_kwargs)
+            CPIC_model = CPIC_model.to(device)
+            _, I_compress, I_predictive = CPIC_model.fit(
+                train_data,
+                init_weights=init_weights,
+                epochs=num_epochs,
+                batch_size=batch_size,
+                lr=lr,
+                early_stop=num_early_stop,
+                verbose=verbose,
+            )
             results_MI[dim_idx, T_pi_idx, 0] = I_compress
             results_MI[dim_idx, T_pi_idx, 1] = I_predictive
 
             # encode train data and test data via CPIC
-            X_train_cpic = [CPIC.encode(torch.from_numpy(Xi).to(torch.float).to(device)) for Xi in X_train_ctd]
+            X_train_cpic = [CPIC_model.encode(torch.from_numpy(Xi).to(torch.float).to(device)) for Xi in X_train_ctd]
             X_train_cpic = [Xi.cpu().detach().numpy() for Xi in X_train_cpic]
             # X_train_dca = [np.dot(Xi, init_weights) for Xi in X_train_ctd]
-            X_test_cpic = CPIC.encode(torch.from_numpy(X_test_ctd).to(torch.float).to(device))
+            X_test_cpic = CPIC_model.encode(torch.from_numpy(X_test_ctd).to(torch.float).to(device))
             X_test_cpic = X_test_cpic.cpu().detach().numpy()
             # X_test_dca = np.dot(X_test_ctd, init_weights)
             ### save encoded test data
@@ -205,7 +245,9 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="CPIC")
     args = parser.parse_args()
     if args.model == "CPIC":
-        from cpic.CPIC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
+        from cpic.CPIC import CPIC
+        from cpic.utils.data import PastFutureDataset
+        from cpic.utils.helpers import DCA_init, Polynomial_expand, resolve_device
     if args.model == "PFPC_RC":
         from PFPC_RC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
     if args.config == 'm1_stochastic_infonce':
@@ -225,6 +267,9 @@ if __name__ == "__main__":
         ydims = np.array([5]).astype(int)
     elif args.config == 'hc_deterministic_infonce_alt':
         config_file = 'config/config_hc_deterministic_infonce_alt.ini'
+        ydims = np.array([5]).astype(int)
+    elif args.config == 'hc_reconstruction_alt':
+        config_file = 'config/config_hc_reconstruction_alt.ini'
         ydims = np.array([5]).astype(int)
     elif args.config == 'temp_stochastic_infonce':
         config_file = 'config/config_temp_stochastic_infonce.ini'
@@ -253,7 +298,7 @@ if __name__ == "__main__":
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
     saved_root = cfg.get('User', 'saved_root')
     if not os.path.exists(saved_root):
-        os.mkdir(saved_root)
+        os.makedirs(saved_root, exist_ok=True)
 
     # set hyper-parameters
     beta = cfg.getfloat('Hyperparameters', 'beta')
@@ -267,13 +312,34 @@ if __name__ == "__main__":
     hidden_dim = cfg.getint('Hyperparameters', 'hidden_dim')
 
     estimator_compress = cfg.get('Hyperparameters', 'estimator_compress')
-    estimator_predictive = cfg.get('Hyperparameters', 'estimator_predictive')
-    critic = cfg.get('Hyperparameters', 'critic')
-    baseline = cfg.get('Hyperparameters', 'baseline')
+    if cfg.has_option('Hyperparameters', 'estimator_predictive'):
+        estimator_predictive = cfg.get('Hyperparameters', 'estimator_predictive')
+        critic = cfg.get('Hyperparameters', 'critic')
+        baseline = cfg.get('Hyperparameters', 'baseline')
+    else:
+        estimator_predictive = 'infonce_lower'
+        critic = 'concat'
+        baseline = 'constant'
     kernel = cfg.get('Hyperparameters', 'kernel')
-    mi_params = {'estimator_compress': estimator_compress, "estimator_predictive": estimator_predictive,
-                 "critic": critic,
-                 "baseline": baseline}
+    mi_params = {'estimator_compress': estimator_compress}
+    if cfg.has_option('Hyperparameters', 'predictive_loss'):
+        predictive_loss = cfg.get('Hyperparameters', 'predictive_loss')
+    else:
+        predictive_loss = 'mi'
+    if predictive_loss == 'mi':
+        mi_params.update({
+            'estimator_predictive': estimator_predictive,
+            'critic': critic,
+            'baseline': baseline,
+        })
+    if cfg.has_option('Hyperparameters', 'reconstruction_targets'):
+        reconstruction_targets = tuple(cfg.get('Hyperparameters', 'reconstruction_targets').split())
+    else:
+        reconstruction_targets = ('past',)
+    if cfg.has_option('Hyperparameters', 'predictive_space'):
+        predictive_space = cfg.get('Hyperparameters', 'predictive_space')
+    else:
+        predictive_space = 'latent'
     # critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
     baseline_params = {"hidden_dim": hidden_dim}
     deterministic = cfg.getboolean('Hyperparameters', 'deterministic')
@@ -284,34 +350,33 @@ if __name__ == "__main__":
     num_early_stop = cfg.getint('Training', 'num_early_stop')
     num_vis = cfg.getint('Training', 'num_vis')
     do_dca_init = cfg.getboolean('Training', 'do_dca_init')
-    device = cfg.get('Training', 'device')
+    device = resolve_device(cfg.get('Training', 'device'))
+    if device != cfg.get('Training', 'device'):
+        print(f"Using device {device!r} (config requested {cfg.get('Training', 'device')!r})")
     lr = cfg.getfloat('Training', 'lr')
 
     if args.config == "m1_stochastic_infonce" or args.config == "m1_stochastic_infonce_alt" \
             or args.config == "m1_deterministic_infonce_alt":
-        # M1 = data_util.load_sabes_data('/home/fan/Data/M1/indy_20160627_01.mat')
-        M1 = data_util.load_sabes_data('/home/rui/Data/M1/indy_20160627_01.mat')
+        M1 = data_util.load_sabes_data(data_path('data', 'real_data', 'M1', 'indy_20160627_01.mat'))
         X, Y = M1['M1'], M1['cursor']
         good_ts = None
         standardize_Y = False
     if args.config == "hc_stochastic_infonce" or args.config == "hc_stochastic_infonce_alt"\
-            or args.config == "hc_deterministic_infonce_alt":
-        # HC = data_util.load_kording_paper_data('/home/fan/Data/HC/example_data_hc.pickle')
-        HC = data_util.load_kording_paper_data('/home/rui/Data/HC/example_data_hc.pickle')
+            or args.config == "hc_deterministic_infonce_alt" or args.config == "hc_reconstruction_alt":
+        HC = data_util.load_kording_paper_data(data_path('data', 'real_data', 'HC', 'example_data_hc.pickle'))
         X, Y = HC['neural'], HC['loc']
         good_ts = 22000
         # good_ts = None
         standardize_Y = False
     if args.config == "temp_stochastic_infonce" or args.config == "temp_stochastic_infonce_alt"\
             or args.config == "temp_deterministic_infonce_alt":
-        # weather = data_util.load_weather_data('/home/fan/Data/TEMP/temperature.csv')
-        weather = data_util.load_weather_data('/home/rui/Data/TEMP/temperature.csv')
+        weather = data_util.load_weather_data(data_path('data', 'real_data', 'TEMP', 'temperature.csv'))
         X, Y = weather, weather
         good_ts = None
         standardize_Y = True
     if args.config == "ms_stochatic_infonce" or args.config == "ms_stochastic_infonce_alt"\
             or args.config == "ms_deterministic_infonce_alt":
-        ms = data_util.load_accel_data('/home/rui/Data/motion_sense/A_DeviceMotion_data/std_6/sub_19.csv')
+        ms = data_util.load_accel_data(data_path('data', 'real_data', 'motion_sense', 'A_DeviceMotion_data', 'std_6', 'sub_19.csv'))
         X, Y = ms, ms
         good_ts = None
         standardize_Y = True
@@ -338,7 +403,9 @@ if __name__ == "__main__":
         regularzation_weight = 0
         result_r2, result_MI = run_analysis_cpic(X, Y, T_pi_vals, dim_vals=[ydim], offset_vals=offsets, decoding_window=win,
                           n_init=n_init, verbose=True, Kernel=Kernel, xdim=xdim, beta=beta, beta1=beta1, beta2=beta2,
-                          good_ts=good_ts, standardize_Y=standardize_Y, regularization_weight=regularzation_weight)
+                          good_ts=good_ts, standardize_Y=standardize_Y, regularization_weight=regularzation_weight,
+                          predictive_loss=predictive_loss, reconstruction_targets=reconstruction_targets,
+                          predictive_space=predictive_space)
 
         with open(saved_root + "/result_dim{}_standard.pkl".format(ydim), "wb") as f:
             pickle.dump([result_r2, result_MI], f)

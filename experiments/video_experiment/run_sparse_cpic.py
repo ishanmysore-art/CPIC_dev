@@ -31,7 +31,7 @@ if str(_REPO_ROOT) not in sys.path:
 from cpic import SparseCPIC
 from cpic.utils.data import PastFutureDataset
 from cpic.utils.helpers import DCA_init
-from experiments.synthetic_lorenz_experiment.utils.data_util import compute_R2, linear_alignment
+from cpic.exp_utils.data_util import compute_R2, linear_alignment
 from experiments.video_experiment.patch_utils import extract_patch_series, patch_mode_on
 
 _EXPERIMENT_ROOT = Path(__file__).resolve().parent

@@ -1,9 +1,35 @@
+import logging
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 import torchvision
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_device(device_pref: str) -> str:
+    """Map a config device string to an available PyTorch device."""
+    pref = (device_pref or "cpu").strip()
+    pref_lower = pref.lower()
+    if pref_lower == "auto":
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+    if pref_lower.startswith("cuda"):
+        if torch.cuda.is_available():
+            return pref
+        logger.warning("%r requested but CUDA is unavailable; using cpu.", pref)
+        return "cpu"
+    if pref_lower == "mps":
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+        logger.warning("mps requested but unavailable; using cpu.")
+        return "cpu"
+    return pref
 
 
 def decoderscores(x_mean, x_vars, x, threshold=1e-6, debug=False):

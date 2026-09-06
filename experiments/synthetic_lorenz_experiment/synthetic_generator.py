@@ -2,8 +2,8 @@ import scipy
 import h5py
 import numpy as np
 from scipy.signal import resample
-from utils.cov_util import calc_cross_cov_mats_from_data
-from utils.plot_util import plot_lorenz_3d
+from cpic.exp_utils.cov_util import calc_cross_cov_mats_from_data
+from cpic.exp_utils.plot_util import plot_lorenz_3d
 import matplotlib.pyplot as plt
 from dca import DynamicalComponentsAnalysis as DCA
 import argparse

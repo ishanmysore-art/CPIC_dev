@@ -4,9 +4,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 import numpy as np
 import tqdm
-from .models import StructuredEncoder, CRITICS, BASELINES
+from .models import StructuredEncoder, StructuredDecoder, CRITICS, BASELINES
 from .mi import estimate_mutual_information
-from .utils.helpers import visualize_conv_kernels
+from .utils.helpers import resolve_device, visualize_conv_kernels
 
 
 class CPIC(nn.Module):
@@ -108,6 +108,17 @@ class CPIC(nn.Module):
         value after the warm-up. The default is 0 (jump straight to the target).
     regularization_weight : float, optional
         Weight for regularization term. The default is 0.
+    predictive_loss : str, optional
+        Predictive term type: ``"mi"`` (default), ``"reconstruction"``, or ``"none"``.
+    reconstruction_targets : tuple, optional
+        When ``predictive_loss="reconstruction"``, which targets to decode from
+        ``Z_past``: ``("past",)`` (default), ``("future",)``, or ``("past", "future")``.
+        Past MSE is weighted by ``beta1``. Future MSE is the reconstruction stand-in for
+        future dependence: weighted by ``beta2`` when ``beta2 > 0``, otherwise by ``beta1``
+        (and averaged with past when both targets are set and ``beta2 == 0``).
+    future_xdim : int, optional
+        Output dimension for future reconstruction when it differs from ``xdim``.
+        Inferred from data in ``fit()`` when unset.
 
     Attributes
     ----------
@@ -149,9 +160,29 @@ class CPIC(nn.Module):
             consistency_weight=0.0,
             beta_warmup_epochs=0,
             beta_ramp_epochs=0,
-            regularization_weight=0
+            regularization_weight=0,
+            predictive_loss="mi",
+            reconstruction_targets=("past",),
+            future_xdim=None,
             ):
         super(CPIC, self).__init__()
+
+        if predictive_loss not in ("mi", "reconstruction", "none"):
+            raise ValueError(
+                f"predictive_loss must be 'mi', 'reconstruction', or 'none'; got {predictive_loss!r}."
+            )
+        self.reconstruction_targets = tuple(reconstruction_targets)
+        for target in self.reconstruction_targets:
+            if target not in ("past", "future"):
+                raise ValueError(
+                    f"reconstruction_targets entries must be 'past' or 'future'; got {target!r}."
+                )
+        if predictive_loss == "reconstruction" and not self.reconstruction_targets:
+            raise ValueError("reconstruction_targets must be non-empty when predictive_loss='reconstruction'.")
+        self.predictive_loss = predictive_loss
+        self.future_xdim = future_xdim
+        self.decoder_past = None
+        self.decoder_future = None
 
         self.predictive_space = predictive_space
         self.compress_ungated = compress_ungated
@@ -167,7 +198,7 @@ class CPIC(nn.Module):
         self.hidden_dim = hidden_dim
         self.T = T
 
-        self.device=device
+        self.device = resolve_device(device)
 
         # initialize encoder network
         self.encoder_params = encoder_params or {}
@@ -201,41 +232,107 @@ class CPIC(nn.Module):
             # Merge partial user-specified MI params with defaults to avoid missing-key failures.
             mi_params = {**default_mi_params, **mi_params}
 
-        # critic network for I_predictive
-        if critic_params is None:
-            if self.predictive_space == "latent":
-                critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
-            elif self.predictive_space == "observation":
-                assert self.xdim is not None, "xdim must be specified for predictive_space='observation'."
-                critic_params = {"x_dim": T * ydim, "y_dim": T * self.xdim, "hidden_dim": hidden_dim}
-        self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
-        self.critic.to(device)
-   
-        # baseline network for I_predictive (baseline(y); y is latent or raw future per predictive_space)
-        if baseline_params is None:
-            baseline_params = {"hidden_dim": hidden_dim}
-        self.baseline_params = baseline_params
-        baseline_type = mi_params.get('baseline', 'constant')
-        if baseline_type == "constant":
-            self.baseline = BASELINES[baseline_type]()
+        self.critic = None
+        self.baseline = None
+        self.critic_YX = None
+        if self.predictive_loss == "mi":
+            # critic network for I_predictive
+            if critic_params is None:
+                if self.predictive_space == "latent":
+                    critic_params = {"x_dim": T * ydim, "y_dim": T * ydim, "hidden_dim": hidden_dim}
+                elif self.predictive_space == "observation":
+                    assert self.xdim is not None, "xdim must be specified for predictive_space='observation'."
+                    critic_params = {"x_dim": T * ydim, "y_dim": T * self.xdim, "hidden_dim": hidden_dim}
+            self.critic = CRITICS[mi_params.get('critic', 'concat')](**critic_params)
+            self.critic.to(self.device)
+
+            # baseline network for I_predictive (baseline(y); y is latent or raw future per predictive_space)
+            if baseline_params is None:
+                baseline_params = {"hidden_dim": hidden_dim}
+            self.baseline_params = baseline_params
+            baseline_type = mi_params.get('baseline', 'constant')
+            if baseline_type == "constant":
+                self.baseline = BASELINES[baseline_type]()
+            else:
+                baseline_input_dim = critic_params["y_dim"]
+                self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
+                self.baseline.to(self.device)
         else:
-            # The baseline scores the same "y" the critic's y-side scores
-            # (encoded future in latent space, raw future in observation space),
-            # so its input dim is exactly the critic's y_dim. Deriving it this way
-            # keeps latent (T*ydim) and observation (T*xdim by default, or T*N_out
-            # for MISO systems via explicit critic_params) correct by construction.
-            baseline_input_dim = critic_params["y_dim"]
-            self.baseline = BASELINES[baseline_type](input_dim=baseline_input_dim, **self.baseline_params)
-            self.baseline.to(device)
-            
+            self.baseline_params = baseline_params or {"hidden_dim": hidden_dim}
 
         # initialize critic network for I_YX
         if self.beta2 > 0:
+            if critic_params_YX is None:
+                raise ValueError("critic_params_YX must be provided when beta2 > 0.")
             self.critic_YX = CRITICS[mi_params.get('critic', 'concat')](**critic_params_YX)
-            self.critic_YX.to(device)
+            self.critic_YX.to(self.device)
 
         self.mi_params = mi_params
         self.regularization_weight=regularization_weight
+
+        if self.predictive_loss == "reconstruction" and self.xdim is not None:
+            self._init_decoders(self.future_xdim)
+
+
+    def _init_decoders(self, future_xdim=None):
+        """Build decoder module(s) for reconstruction loss."""
+        if self.predictive_loss != "reconstruction":
+            return
+        if future_xdim is None:
+            future_xdim = self.future_xdim if self.future_xdim is not None else self.xdim
+        self.future_xdim = future_xdim
+
+        decoder_kwargs = {
+            "encoder_type": self.encoder_type,
+            "T": self.T,
+            **self.encoder_kwargs,
+        }
+        need_past = "past" in self.reconstruction_targets
+        need_future = "future" in self.reconstruction_targets
+
+        if need_past:
+            self.decoder_past = StructuredDecoder(
+                input_dim=self.ydim,
+                hidden_dim=self.hidden_dim,
+                output_dim=self.xdim,
+                **decoder_kwargs,
+            )
+            self.decoder_past.to(self.device)
+
+        if need_future:
+            if need_past and future_xdim == self.xdim:
+                self.decoder_future = self.decoder_past
+            else:
+                self.decoder_future = StructuredDecoder(
+                    input_dim=self.ydim,
+                    hidden_dim=self.hidden_dim,
+                    output_dim=future_xdim,
+                    **decoder_kwargs,
+                )
+                self.decoder_future.to(self.device)
+
+    def _compute_reconstruction_losses(self, encoded_past, X_past, X_future):
+        """MSE reconstruction from past latent Z_past to configured targets.
+
+        Returns
+        -------
+        past_loss : torch.Tensor or None
+            MSE(Z_past → X_past) when ``"past"`` is in ``reconstruction_targets``.
+        future_loss : torch.Tensor or None
+            MSE(Z_past → X_future) when ``"future"`` is in ``reconstruction_targets``.
+            This is the reconstruction stand-in for future dependence I(Y; X_future).
+        """
+        past_loss = None
+        future_loss = None
+        if "past" in self.reconstruction_targets:
+            decoded_past = self.decoder_past(encoded_past)
+            past_loss = torch.mean((decoded_past - X_past) ** 2)
+        if "future" in self.reconstruction_targets:
+            decoded_future = self.decoder_future(encoded_past)
+            future_loss = torch.mean((decoded_future - X_future) ** 2)
+        if past_loss is None and future_loss is None:
+            raise ValueError("reconstruction_targets must include 'past' and/or 'future'.")
+        return past_loss, future_loss
 
 
     def forward(self, X_past, X_future, debug=False):
@@ -257,9 +354,10 @@ class CPIC(nn.Module):
             CPIC loss.
         I_compress_bound : torch.Tensor
             Estimated compression mutual information bound.
-        I_predictive_bound : torch.Tensor
-            Estimated predictive mutual information bound.
-        """    
+        predictive_metric : torch.Tensor
+            ``I_predictive_bound`` when ``predictive_loss='mi'``, ``I_reconstruction``
+            when ``predictive_loss='reconstruction'``, or zero when ``predictive_loss='none'``.
+        """
         batch_size = X_past.shape[0]
 
         encoded_past_mean, encoded_past_vars = self.encoder(X_past)
@@ -267,10 +365,11 @@ class CPIC(nn.Module):
                        torch.randn(*encoded_past_mean.size()).to(self.device)
         encoded_past_reshaped = encoded_past.reshape(batch_size, -1)
 
+        encoded_future_reshaped = None
         # Only the latent predictive space pushes the future through the encoder.
         # In observation space the future is used raw, which lets the output
         # dimension differ from the input dimension (e.g. MISO input/output systems).
-        if self.predictive_space == "latent":
+        if self.predictive_loss == "mi" and self.predictive_space == "latent":
             if X_future.shape[-1] != X_past.shape[-1]:
                 raise ValueError(
                     "predictive_space='latent' encodes the future with the same encoder "
@@ -308,25 +407,67 @@ class CPIC(nn.Module):
         else:
             I_compress_bound = estimate_mutual_information(self.mi_params['estimator_compress'], X_past,
                                                            encoded_past_reshaped, decoder=self.encoder, device=self.device)
-        if self.predictive_space == "latent":
-            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
-                                                             encoded_past_reshaped,
-                                                             encoded_future_reshaped, critic_fn=self.critic,
-                                                             baseline_fn=self.baseline, device=self.device)
-        elif self.predictive_space == "observation":
-            I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
-                                                             encoded_past_reshaped,
-                                                             future_reshaped, critic_fn=self.critic,
-                                                             baseline_fn=self.baseline, device=self.device)
-        else:
-            raise ValueError('The predictive space is not specified.')
 
-        if self.beta2 > 0:
+        I_predictive_bound = None
+        I_reconstruction = None
+        recon_past_loss = None
+        recon_future_loss = None
+        if self.predictive_loss == "mi":
+            if self.predictive_space == "latent":
+                I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
+                                                                 encoded_past_reshaped,
+                                                                 encoded_future_reshaped, critic_fn=self.critic,
+                                                                 baseline_fn=self.baseline, device=self.device)
+            elif self.predictive_space == "observation":
+                I_predictive_bound = estimate_mutual_information(self.mi_params['estimator_predictive'],
+                                                                 encoded_past_reshaped,
+                                                                 future_reshaped, critic_fn=self.critic,
+                                                                 baseline_fn=self.baseline, device=self.device)
+            else:
+                raise ValueError('The predictive space is not specified.')
+            predictive_metric = I_predictive_bound
+        elif self.predictive_loss == "reconstruction":
+            if self.decoder_past is None and self.decoder_future is None:
+                self._init_decoders(future_xdim=X_future.shape[-1])
+            recon_past_loss, recon_future_loss = self._compute_reconstruction_losses(
+                encoded_past, X_past, X_future)
+            recon_terms = [t for t in (recon_past_loss, recon_future_loss) if t is not None]
+            I_reconstruction = sum(recon_terms) / len(recon_terms)
+            predictive_metric = I_reconstruction
+        else:
+            predictive_metric = torch.tensor(0.0, device=self.device)
+
+        # Future dependence I(Y; X_future):
+        # - MI mode (and recon without a future target): maximize InfoNCE lower bound → subtract.
+        # - Reconstruction with "future" target: minimize MSE(Z_past → X_future) → add; skip I_YX.
+        use_recon_future_dependence = recon_future_loss is not None
+        if self.beta2 > 0 and not use_recon_future_dependence:
             I_YX_bound = estimate_mutual_information("infonce_lower", encoded_past_reshaped,
                                                  future_reshaped, critic_fn=self.critic_YX, device=self.device)
-            L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
-        else:
+            if self.predictive_loss == "mi":
+                L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound - self.beta2 * I_YX_bound
+            elif self.predictive_loss == "reconstruction":
+                L = self.beta * I_compress_bound + self.beta1 * I_reconstruction - self.beta2 * I_YX_bound
+            else:
+                L = self.beta * I_compress_bound - self.beta2 * I_YX_bound
+        elif self.predictive_loss == "mi":
             L = self.beta * I_compress_bound - self.beta1 * I_predictive_bound
+        elif self.predictive_loss == "reconstruction":
+            L = self.beta * I_compress_bound
+            if recon_past_loss is not None and recon_future_loss is not None and self.beta2 > 0:
+                # Split: past recon under beta1; future dependence under beta2.
+                L = L + self.beta1 * recon_past_loss + self.beta2 * recon_future_loss
+            elif recon_past_loss is not None and recon_future_loss is not None:
+                # Both targets, no beta2: average under beta1 (same scale as a single target).
+                L = L + self.beta1 * I_reconstruction
+            elif recon_past_loss is not None:
+                L = L + self.beta1 * recon_past_loss
+            else:
+                # Future-only: beta2 when set, otherwise beta1.
+                future_weight = self.beta2 if self.beta2 > 0 else self.beta1
+                L = L + future_weight * recon_future_loss
+        else:
+            L = self.beta * I_compress_bound
 
         # Consistency loss (opt-in): pull the gated encoding toward the ungated one.
         if L_consist is not None and self.consistency_weight > 0:
@@ -341,8 +482,8 @@ class CPIC(nn.Module):
         if debug:
             estimate_mutual_information(self.mi_params['estimator_compress'], X_past, encoded_past_reshaped,
                                         decoder=self.encoder, device=self.device, debug=debug)
-            
-        return L, I_compress_bound, I_predictive_bound
+
+        return L, I_compress_bound, predictive_metric
 
 
     def _beta_at_epoch(self, epoch):
@@ -490,6 +631,7 @@ class CPIC(nn.Module):
         infonce_upper_keys = [
             k for k in ("estimator_compress", "estimator_predictive")
             if self.mi_params.get(k) == "infonce_upper"
+            and (k != "estimator_predictive" or self.predictive_loss == "mi")
         ]
         if infonce_upper_keys and batch_size < 2:
             raise ValueError(
@@ -511,6 +653,12 @@ class CPIC(nn.Module):
                 **self.encoder_kwargs,
             )
             self.encoder.to(self.device)
+
+        if self.predictive_loss == "reconstruction":
+            future_xdim = self.future_xdim
+            if future_xdim is None:
+                future_xdim = X[0][1].shape[-1]
+            self._init_decoders(future_xdim)
 
         # initialize encoder weights
         if init_weights is not None:
@@ -548,11 +696,14 @@ class CPIC(nn.Module):
 
         stats = {"mean": np.mean, "std": np.std, "min": np.min, "max": np.max} # for mutual information bounds
 
-        if self.init_weights is not None:
+        if self.init_weights is not None and self.critic is not None:
             do_init = True
             optimizer_init = torch.optim.Adam(list(self.critic.parameters()), lr=lr)
         else:
             do_init = False
+
+        use_reconstruction = self.predictive_loss == "reconstruction"
+        predictive_label = "reconstruction_loss" if use_reconstruction else "I_predictive_bound"
 
         for epoch in tqdm.tqdm(range(epochs), disable=not verbose):
             # Rate warm-up: set the live beta for this epoch (no-op when warmup/ramp are 0).
@@ -585,7 +736,10 @@ class CPIC(nn.Module):
                 if writer:
                     writer.add_scalar("batch/loss", loss.item(), global_step)
                     writer.add_scalar("batch/I_compress", I_compress_bound.item(), global_step)
-                    writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
+                    if use_reconstruction:
+                        writer.add_scalar("batch/reconstruction_loss", I_predictive_bound.item(), global_step)
+                    else:
+                        writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
                     global_step += 1
 
                 loss_by_epoch.append(loss.item())
@@ -597,7 +751,10 @@ class CPIC(nn.Module):
             mean_I_predictive = np.mean(I_predictive_bound_by_epoch)
             self.final_mean_I_compress = float(mean_I_compress)
             self.final_mean_I_predictive = float(mean_I_predictive)
-            print(f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, I_predictive_bound={mean_I_predictive:.4f}")
+            print(
+                f"Epoch {epoch}: loss={mean_loss:.4f}, I_compress_bound={mean_I_compress:.4f}, "
+                f"{predictive_label}={mean_I_predictive:.4f}"
+            )
 
             if writer:
                 writer.add_scalar("epoch/loss/mean", mean_loss, global_step=epoch)
@@ -608,9 +765,10 @@ class CPIC(nn.Module):
                     writer.add_histogram("epoch/I_compress_dist", np.array(I_compress_bound_by_epoch), epoch)
 
                 if len(I_predictive_bound_by_epoch) > 0:
-                    for name, fn in stats.items():                    
-                        writer.add_scalar(f"epoch/I_predictive/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
-                    writer.add_histogram("epoch/I_predictive_dist", np.array(I_predictive_bound_by_epoch), epoch)
+                    metric_prefix = "reconstruction_loss" if use_reconstruction else "I_predictive"
+                    for name, fn in stats.items():
+                        writer.add_scalar(f"epoch/{metric_prefix}/{name}", fn(I_predictive_bound_by_epoch), global_step=epoch)
+                    writer.add_histogram(f"epoch/{metric_prefix}_dist", np.array(I_predictive_bound_by_epoch), epoch)
 
                 if compute_encoded_mean_stats:
                     self.compute_encoded_mean_stats(X, batch_size=batch_size, writer=writer, step=epoch)
