@@ -1,0 +1,17 @@
+WARNING:cpic.utils.helpers:'cuda:0' requested but CUDA is unavailable; using cpu.
+Using device 'cpu' (config requested 'cuda:0')
+dim 1 of 1
+  0%|          | 0/10 [00:00<?, ?it/s] 10%|█         | 1/10 [00:38<05:48, 38.70s/it] 20%|██        | 2/10 [01:19<05:19, 39.90s/it] 30%|███       | 3/10 [01:55<04:26, 38.12s/it] 40%|████      | 4/10 [02:31<03:44, 37.48s/it] 50%|█████     | 5/10 [03:05<03:00, 36.01s/it] 60%|██████    | 6/10 [03:41<02:24, 36.22s/it] 70%|███████   | 7/10 [04:15<01:46, 35.37s/it] 80%|████████  | 8/10 [04:48<01:09, 34.50s/it] 90%|█████████ | 9/10 [05:21<00:34, 34.18s/it]100%|██████████| 10/10 [05:55<00:00, 34.01s/it]100%|██████████| 10/10 [05:55<00:00, 35.53s/it]
+Epoch 0: loss=-0.2613, I_compress_bound=3.2144, I_predictive_bound=0.2645
+Epoch 1: loss=-0.3479, I_compress_bound=3.1975, I_predictive_bound=0.3511
+Epoch 2: loss=-0.3545, I_compress_bound=3.1996, I_predictive_bound=0.3577
+Epoch 3: loss=-0.4111, I_compress_bound=3.4545, I_predictive_bound=0.4145
+Epoch 4: loss=-0.4444, I_compress_bound=3.7005, I_predictive_bound=0.4481
+Epoch 5: loss=-0.4841, I_compress_bound=4.0183, I_predictive_bound=0.4882
+Epoch 6: loss=-0.5385, I_compress_bound=4.3950, I_predictive_bound=0.5429
+Epoch 7: loss=-0.5779, I_compress_bound=4.9169, I_predictive_bound=0.5828
+Epoch 8: loss=-0.6414, I_compress_bound=5.5228, I_predictive_bound=0.6470
+Epoch 9: loss=-0.6948, I_compress_bound=6.2092, I_predictive_bound=0.7010
+dim_idx: 5, R2: [[0.20387231]
+ [0.20777446]
+ [0.17852243]]

@@ -1,0 +1,28 @@
+Using latent dimensions: [64]
+dim 1 of 1
+
+  0%|          | 0/10 [00:00<?, ?it/s]
+ 10%|█         | 1/10 [01:55<17:20, 115.65s/it]
+ 20%|██        | 2/10 [04:39<19:11, 143.88s/it]
+ 30%|███       | 3/10 [07:06<16:58, 145.45s/it]
+ 40%|████      | 4/10 [09:40<14:52, 148.68s/it]
+ 50%|█████     | 5/10 [11:48<11:47, 141.48s/it]
+ 60%|██████    | 6/10 [13:47<08:55, 133.78s/it]
+ 70%|███████   | 7/10 [15:50<06:30, 130.22s/it]
+ 80%|████████  | 8/10 [17:51<04:14, 127.12s/it]
+ 90%|█████████ | 9/10 [19:56<02:06, 126.45s/it]
+100%|██████████| 10/10 [22:24<00:00, 133.12s/it]
+100%|██████████| 10/10 [22:24<00:00, 134.42s/it]
+Epoch 0: loss=-0.1474, I_compress_bound=35.5399, I_predictive_bound=0.1830
+Epoch 1: loss=-0.3416, I_compress_bound=35.5283, I_predictive_bound=0.3771
+Epoch 2: loss=-0.3982, I_compress_bound=35.5582, I_predictive_bound=0.4338
+Epoch 3: loss=-0.5630, I_compress_bound=36.8037, I_predictive_bound=0.5998
+Epoch 4: loss=-0.6768, I_compress_bound=38.9610, I_predictive_bound=0.7157
+Epoch 5: loss=-0.8231, I_compress_bound=42.7483, I_predictive_bound=0.8659
+Epoch 6: loss=-0.9773, I_compress_bound=48.4750, I_predictive_bound=1.0258
+Epoch 7: loss=-1.1436, I_compress_bound=56.5109, I_predictive_bound=1.2001
+Epoch 8: loss=-1.3030, I_compress_bound=66.6722, I_predictive_bound=1.3697
+Epoch 9: loss=-1.4453, I_compress_bound=78.8040, I_predictive_bound=1.5241
+dim_idx: 64, R2: [[0.30555488]
+ [0.31601838]
+ [0.26799621]]

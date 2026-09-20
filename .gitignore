@@ -27,6 +27,9 @@ htmlcov/
 *.gif
 *.png
 CLAUDE.md
+notes/
+ENVIRONMENT.md
+REPRODUCTION.md
 
 # synthetic lorenz data
 experiments/synthetic_lorenz_experiment/data/
@@ -36,3 +39,6 @@ experiments/video_experiment/res/
 
 # personal/cluster-specific launcher scripts (SLURM, paths)
 experiments/particle_experiment/scripts/
+
+# real data experiments logs
+experiments/real_data_experiments/m1_stochastic_infonce_reproduction.log

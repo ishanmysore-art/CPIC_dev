@@ -166,10 +166,11 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
         # loop over T_pi vals
         for T_pi_idx in range(len(T_pi_vals)):
             T_pi = T_pi_vals[T_pi_idx]
-            critic_params = {"x_dim": T_pi * ydim, "y_dim": T_pi * ydim, "hidden_dim": hidden_dim}
-            critic_params_YX = {"x_dim": T_pi * ydim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim}
+            critic_params = {"x_dim": T_pi * dim, "y_dim": T_pi * dim, "hidden_dim": hidden_dim,}
+            critic_params_YX = {"x_dim": T_pi * dim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim,}
+
             if predictive_loss == "mi" and predictive_space == "observation":
-                critic_params = {"x_dim": T_pi * ydim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim}
+                critic_params = {"x_dim": T_pi * dim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim,}
             # train data
             if do_dca_init:
                 init_weights = DCA_init(np.concatenate(X_train_ctd, axis=0), T=T_pi, d=dim, n_init=n_init)
@@ -178,7 +179,11 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
 
             train_data = PastFutureDataset(X_train_ctd, window_size=T_pi)
 
-            encoder_params = {"deterministic": deterministic}
+            encoder_params = {
+                "deterministic": deterministic,
+                "n_layers": n_layers,
+            }
+
             if kernel == "Linear":
                 encoder_params["encoder_type"] = "linear"
             else:
@@ -243,57 +248,89 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CPIC for real data.')
     parser.add_argument('--config', type=str, default="hc_stochastic_infonce_alt")
     parser.add_argument('--model', type=str, default="CPIC")
+    parser.add_argument(
+        '--ydim',
+        type=int,
+        default=None,
+        help='Override latent dimension'
+    )
     args = parser.parse_args()
+
     if args.model == "CPIC":
         from cpic.CPIC import CPIC
         from cpic.utils.data import PastFutureDataset
         from cpic.utils.helpers import DCA_init, Polynomial_expand, resolve_device
+
     if args.model == "PFPC_RC":
         from PFPC_RC import PastFutureDataset, train_CPIC, DCA_init, Polynomial_expand
+
+    # Keep original config-selection logic
     if args.config == 'm1_stochastic_infonce':
         config_file = 'config/config_m1_stochastic_infonce.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'm1_stochastic_infonce_alt':
         config_file = 'config/config_m1_stochastic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'm1_deterministic_infonce_alt':
         config_file = 'config/config_m1_deterministic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'hc_stochastic_infonce':
         config_file = 'config/config_hc_stochastic_infonce.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'hc_stochastic_infonce_alt':
         config_file = 'config/config_hc_stochastic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'hc_deterministic_infonce_alt':
         config_file = 'config/config_hc_deterministic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'hc_reconstruction_alt':
         config_file = 'config/config_hc_reconstruction_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'temp_stochastic_infonce':
         config_file = 'config/config_temp_stochastic_infonce.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'temp_stochastic_infonce_alt':
         config_file = 'config/config_temp_stochastic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'temp_deterministic_infonce_alt':
         config_file = 'config/config_temp_deterministic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'ms_stochastic_infonce':
         config_file = 'config/config_ms_stochastic_infonce.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'ms_stochastic_infonce_alt':
         config_file = 'config/config_ms_stochastic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     elif args.config == 'ms_deterministic_infonce_alt':
         config_file = 'config/config_ms_deterministic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
+
     else:
         raise ValueError("{} has not been implemented!".format(args.config))
 
     cfg = myconf()
     cfg.read(config_file)
+
+    if args.ydim is not None:
+        ydims = np.array([args.ydim]).astype(int)
+    else:
+        ydims = np.array([
+            cfg.getint('Hyperparameters', 'ydim')
+        ]).astype(int)
+
+    print("Using latent dimensions:", ydims)
 
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
     saved_root = cfg.get('User', 'saved_root')
@@ -309,7 +346,17 @@ if __name__ == "__main__":
     Ts = Ts.split(' ')
     Ts = [int(T) for T in Ts]
     # import pdb; pdb.set_trace()
+    if cfg.has_option('Hyperparameters', 'n_layers'):
+        n_layers = cfg.getint('Hyperparameters', 'n_layers')
+    else:
+        n_layers = 1
+
     hidden_dim = cfg.getint('Hyperparameters', 'hidden_dim')
+    n_layers = cfg.getint(
+        'Hyperparameters',
+        'n_layers',
+        fallback=1
+    )
 
     estimator_compress = cfg.get('Hyperparameters', 'estimator_compress')
     if cfg.has_option('Hyperparameters', 'estimator_predictive'):
