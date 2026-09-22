@@ -696,7 +696,9 @@ class CPIC(nn.Module):
 
         stats = {"mean": np.mean, "std": np.std, "min": np.min, "max": np.max} # for mutual information bounds
 
-        if self.init_weights is not None and self.critic is not None:
+        if self.critic is not None and (
+            self.init_weights is not None or self.encoder_type == "mlp"
+        ):
             do_init = True
             optimizer_init = torch.optim.Adam(list(self.critic.parameters()), lr=lr)
         else:
@@ -715,6 +717,10 @@ class CPIC(nn.Module):
 
                 loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
 
+                optimizer.zero_grad()
+                if do_init:
+                    optimizer_init.zero_grad()
+
                 loss.backward()
 
                 # Check if gradients are NaN
@@ -728,10 +734,8 @@ class CPIC(nn.Module):
                     break
                 if do_init and epoch < (epochs / 4):
                     optimizer_init.step()
-                    optimizer_init.zero_grad()
                 else:
                     optimizer.step()
-                    optimizer.zero_grad()
 
                 if writer:
                     writer.add_scalar("batch/loss", loss.item(), global_step)
@@ -1093,6 +1097,10 @@ class SparseCPIC(CPIC):
                     decoder_loss_lambda=self.decoder_loss_lambda,
                 )
 
+                optimizer.zero_grad()
+                if do_init:
+                    optimizer_init.zero_grad()
+
                 loss.backward()
 
                 # Check if gradients are NaN
@@ -1106,10 +1114,8 @@ class SparseCPIC(CPIC):
                     break
                 if do_init and epoch < (epochs / 4):
                     optimizer_init.step()
-                    optimizer_init.zero_grad()
                 else:
                     optimizer.step()
-                    optimizer.zero_grad()
 
                 if writer:
                     writer.add_scalar("batch/loss", loss.item(), global_step)

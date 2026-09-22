@@ -1,0 +1,17 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [20]
+dim 1 of 1
+  0%|          | 0/10 [00:00<?, ?it/s] 10%|█         | 1/10 [00:03<00:27,  3.05s/it] 20%|██        | 2/10 [00:05<00:22,  2.85s/it] 30%|███       | 3/10 [00:08<00:19,  2.78s/it] 40%|████      | 4/10 [00:11<00:16,  2.76s/it] 50%|█████     | 5/10 [00:13<00:13,  2.74s/it] 60%|██████    | 6/10 [00:16<00:10,  2.74s/it] 70%|███████   | 7/10 [00:19<00:08,  2.73s/it] 80%|████████  | 8/10 [00:22<00:05,  2.73s/it] 90%|█████████ | 9/10 [00:24<00:02,  2.73s/it]100%|██████████| 10/10 [00:27<00:00,  2.73s/it]100%|██████████| 10/10 [00:27<00:00,  2.75s/it]
+Epoch 0: loss=-0.2201, I_compress_bound=10.7186, I_predictive_bound=0.2308
+Epoch 1: loss=-0.3791, I_compress_bound=10.6870, I_predictive_bound=0.3898
+Epoch 2: loss=-0.4251, I_compress_bound=10.6598, I_predictive_bound=0.4357
+Epoch 3: loss=-0.5306, I_compress_bound=11.4602, I_predictive_bound=0.5421
+Epoch 4: loss=-0.6178, I_compress_bound=12.3570, I_predictive_bound=0.6302
+Epoch 5: loss=-0.7159, I_compress_bound=13.8383, I_predictive_bound=0.7297
+Epoch 6: loss=-0.8151, I_compress_bound=15.8704, I_predictive_bound=0.8310
+Epoch 7: loss=-0.9231, I_compress_bound=18.5836, I_predictive_bound=0.9417
+Epoch 8: loss=-1.0394, I_compress_bound=21.8460, I_predictive_bound=1.0612
+Epoch 9: loss=-1.1414, I_compress_bound=25.7354, I_predictive_bound=1.1672
+dim_idx: 20, R2: [[0.2906873 ]
+ [0.30344463]
+ [0.25832787]]

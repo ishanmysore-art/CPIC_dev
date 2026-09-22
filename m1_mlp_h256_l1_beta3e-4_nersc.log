@@ -1,0 +1,37 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:05<02:36,  5.38s/it]  7%|▋         | 2/30 [00:10<02:24,  5.14s/it] 10%|█         | 3/30 [00:15<02:15,  5.04s/it] 13%|█▎        | 4/30 [00:20<02:09,  4.97s/it] 17%|█▋        | 5/30 [00:25<02:03,  4.93s/it] 20%|██        | 6/30 [00:29<01:57,  4.91s/it] 23%|██▎       | 7/30 [00:34<01:52,  4.90s/it] 27%|██▋       | 8/30 [00:39<01:47,  4.89s/it] 30%|███       | 9/30 [00:44<01:42,  4.89s/it] 33%|███▎      | 10/30 [00:49<01:37,  4.88s/it] 37%|███▋      | 11/30 [00:54<01:32,  4.88s/it] 40%|████      | 12/30 [00:59<01:27,  4.88s/it] 43%|████▎     | 13/30 [01:03<01:22,  4.87s/it] 47%|████▋     | 14/30 [01:08<01:18,  4.88s/it] 50%|█████     | 15/30 [01:13<01:13,  4.89s/it] 53%|█████▎    | 16/30 [01:18<01:08,  4.89s/it] 57%|█████▋    | 17/30 [01:23<01:03,  4.88s/it] 60%|██████    | 18/30 [01:28<00:58,  4.88s/it] 63%|██████▎   | 19/30 [01:33<00:53,  4.88s/it] 67%|██████▋   | 20/30 [01:38<00:48,  4.89s/it] 70%|███████   | 21/30 [01:43<00:44,  4.90s/it] 73%|███████▎  | 22/30 [01:48<00:39,  4.93s/it] 77%|███████▋  | 23/30 [01:53<00:34,  4.94s/it] 80%|████████  | 24/30 [01:58<00:29,  4.94s/it] 83%|████████▎ | 25/30 [02:02<00:24,  4.94s/it] 87%|████████▋ | 26/30 [02:07<00:19,  4.95s/it] 90%|█████████ | 27/30 [02:12<00:14,  4.96s/it] 93%|█████████▎| 28/30 [02:17<00:09,  4.96s/it] 97%|█████████▋| 29/30 [02:22<00:04,  4.95s/it]100%|██████████| 30/30 [02:27<00:00,  4.94s/it]100%|██████████| 30/30 [02:27<00:00,  4.92s/it]
+Epoch 0: loss=0.0024, I_compress_bound=5.1984, I_predictive_bound=-0.0009
+Epoch 1: loss=0.0022, I_compress_bound=5.2055, I_predictive_bound=-0.0006
+Epoch 2: loss=0.0020, I_compress_bound=5.1998, I_predictive_bound=-0.0005
+Epoch 3: loss=0.0018, I_compress_bound=5.2070, I_predictive_bound=-0.0003
+Epoch 4: loss=0.0018, I_compress_bound=5.2003, I_predictive_bound=-0.0002
+Epoch 5: loss=0.0017, I_compress_bound=5.2052, I_predictive_bound=-0.0001
+Epoch 6: loss=0.0017, I_compress_bound=5.2185, I_predictive_bound=-0.0002
+Epoch 7: loss=0.0018, I_compress_bound=5.2135, I_predictive_bound=-0.0002
+Epoch 8: loss=0.0004, I_compress_bound=0.8889, I_predictive_bound=-0.0002
+Epoch 9: loss=0.0004, I_compress_bound=0.3179, I_predictive_bound=-0.0003
+Epoch 10: loss=0.0001, I_compress_bound=0.2081, I_predictive_bound=-0.0001
+Epoch 11: loss=0.0002, I_compress_bound=0.1817, I_predictive_bound=-0.0001
+Epoch 12: loss=0.0002, I_compress_bound=0.1330, I_predictive_bound=-0.0001
+Epoch 13: loss=0.0002, I_compress_bound=0.1027, I_predictive_bound=-0.0001
+Epoch 14: loss=0.0001, I_compress_bound=0.0733, I_predictive_bound=-0.0001
+Epoch 15: loss=0.0001, I_compress_bound=0.0597, I_predictive_bound=-0.0001
+Epoch 16: loss=0.0000, I_compress_bound=0.0397, I_predictive_bound=-0.0000
+Epoch 17: loss=0.0001, I_compress_bound=0.0486, I_predictive_bound=-0.0001
+Epoch 18: loss=0.0001, I_compress_bound=0.0421, I_predictive_bound=-0.0001
+Epoch 19: loss=0.0001, I_compress_bound=0.0286, I_predictive_bound=-0.0001
+Epoch 20: loss=0.0001, I_compress_bound=0.0311, I_predictive_bound=-0.0001
+Epoch 21: loss=0.0001, I_compress_bound=0.0341, I_predictive_bound=-0.0000
+Epoch 22: loss=0.0001, I_compress_bound=0.0144, I_predictive_bound=-0.0000
+Epoch 23: loss=0.0001, I_compress_bound=0.0087, I_predictive_bound=-0.0001
+Epoch 24: loss=0.0000, I_compress_bound=0.0052, I_predictive_bound=-0.0000
+Epoch 25: loss=0.0000, I_compress_bound=0.0038, I_predictive_bound=-0.0000
+Epoch 26: loss=0.0001, I_compress_bound=0.0012, I_predictive_bound=-0.0001
+Epoch 27: loss=0.0000, I_compress_bound=0.0008, I_predictive_bound=-0.0000
+Epoch 28: loss=0.0000, I_compress_bound=0.0003, I_predictive_bound=-0.0000
+Epoch 29: loss=0.0000, I_compress_bound=-0.0000, I_predictive_bound=-0.0000
+dim_idx: 64, R2: [[-0.00478184]
+ [-0.00508888]
+ [-0.00484207]]

@@ -1,0 +1,37 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:05<02:50,  5.87s/it]  7%|▋         | 2/30 [00:11<02:36,  5.58s/it] 10%|█         | 3/30 [00:16<02:27,  5.47s/it] 13%|█▎        | 4/30 [00:21<02:21,  5.42s/it] 17%|█▋        | 5/30 [00:27<02:14,  5.39s/it] 20%|██        | 6/30 [00:32<02:08,  5.34s/it] 23%|██▎       | 7/30 [00:37<02:01,  5.29s/it] 27%|██▋       | 8/30 [00:42<01:55,  5.27s/it] 30%|███       | 9/30 [00:48<01:50,  5.26s/it] 33%|███▎      | 10/30 [00:53<01:44,  5.24s/it] 37%|███▋      | 11/30 [00:58<01:39,  5.24s/it] 40%|████      | 12/30 [01:03<01:34,  5.24s/it] 43%|████▎     | 13/30 [01:09<01:29,  5.24s/it] 47%|████▋     | 14/30 [01:14<01:23,  5.24s/it] 50%|█████     | 15/30 [01:19<01:18,  5.24s/it] 53%|█████▎    | 16/30 [01:24<01:13,  5.23s/it] 57%|█████▋    | 17/30 [01:30<01:08,  5.23s/it] 60%|██████    | 18/30 [01:35<01:02,  5.23s/it] 63%|██████▎   | 19/30 [01:40<00:57,  5.23s/it] 67%|██████▋   | 20/30 [01:45<00:52,  5.23s/it] 70%|███████   | 21/30 [01:50<00:47,  5.23s/it] 73%|███████▎  | 22/30 [01:56<00:41,  5.23s/it] 77%|███████▋  | 23/30 [02:01<00:36,  5.23s/it] 80%|████████  | 24/30 [02:06<00:31,  5.23s/it] 83%|████████▎ | 25/30 [02:11<00:26,  5.23s/it] 87%|████████▋ | 26/30 [02:17<00:20,  5.23s/it] 90%|█████████ | 27/30 [02:22<00:15,  5.23s/it] 93%|█████████▎| 28/30 [02:27<00:10,  5.23s/it] 97%|█████████▋| 29/30 [02:32<00:05,  5.23s/it]100%|██████████| 30/30 [02:37<00:00,  5.23s/it]100%|██████████| 30/30 [02:37<00:00,  5.27s/it]
+Epoch 0: loss=0.0021, I_compress_bound=3.3887, I_predictive_bound=-0.0011
+Epoch 1: loss=0.0015, I_compress_bound=3.3926, I_predictive_bound=-0.0005
+Epoch 2: loss=0.0014, I_compress_bound=3.3995, I_predictive_bound=-0.0004
+Epoch 3: loss=0.0012, I_compress_bound=3.3772, I_predictive_bound=-0.0002
+Epoch 4: loss=0.0012, I_compress_bound=3.3885, I_predictive_bound=-0.0002
+Epoch 5: loss=0.0011, I_compress_bound=3.3923, I_predictive_bound=-0.0001
+Epoch 6: loss=0.0011, I_compress_bound=3.3712, I_predictive_bound=-0.0001
+Epoch 7: loss=0.0012, I_compress_bound=3.3863, I_predictive_bound=-0.0002
+Epoch 8: loss=0.0003, I_compress_bound=0.1947, I_predictive_bound=-0.0002
+Epoch 9: loss=0.0002, I_compress_bound=0.0480, I_predictive_bound=-0.0002
+Epoch 10: loss=0.0002, I_compress_bound=0.0367, I_predictive_bound=-0.0002
+Epoch 11: loss=0.0001, I_compress_bound=0.0160, I_predictive_bound=-0.0001
+Epoch 12: loss=0.0001, I_compress_bound=0.0340, I_predictive_bound=-0.0001
+Epoch 13: loss=0.0000, I_compress_bound=0.0096, I_predictive_bound=-0.0000
+Epoch 14: loss=0.0001, I_compress_bound=0.0099, I_predictive_bound=-0.0001
+Epoch 15: loss=0.0000, I_compress_bound=0.0055, I_predictive_bound=-0.0000
+Epoch 16: loss=0.0000, I_compress_bound=0.0041, I_predictive_bound=-0.0000
+Epoch 17: loss=0.0000, I_compress_bound=0.0035, I_predictive_bound=-0.0000
+Epoch 18: loss=0.0000, I_compress_bound=0.0027, I_predictive_bound=-0.0000
+Epoch 19: loss=0.0000, I_compress_bound=0.0019, I_predictive_bound=-0.0000
+Epoch 20: loss=0.0000, I_compress_bound=0.0021, I_predictive_bound=-0.0000
+Epoch 21: loss=0.0000, I_compress_bound=0.0018, I_predictive_bound=-0.0000
+Epoch 22: loss=0.0000, I_compress_bound=0.0010, I_predictive_bound=-0.0000
+Epoch 23: loss=0.0000, I_compress_bound=0.0014, I_predictive_bound=-0.0000
+Epoch 24: loss=0.0000, I_compress_bound=0.0016, I_predictive_bound=-0.0000
+Epoch 25: loss=0.0000, I_compress_bound=0.0010, I_predictive_bound=-0.0000
+Epoch 26: loss=0.0000, I_compress_bound=0.0010, I_predictive_bound=-0.0000
+Epoch 27: loss=0.0000, I_compress_bound=0.0013, I_predictive_bound=0.0000
+Epoch 28: loss=0.0000, I_compress_bound=0.0010, I_predictive_bound=-0.0000
+Epoch 29: loss=0.0000, I_compress_bound=0.0009, I_predictive_bound=-0.0000
+dim_idx: 64, R2: [[0.00364956]
+ [0.01606235]
+ [0.01608644]]

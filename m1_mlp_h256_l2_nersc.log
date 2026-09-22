@@ -1,0 +1,14 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/10 [00:00<?, ?it/s] 10%|█         | 1/10 [00:05<00:51,  5.72s/it] 20%|██        | 2/10 [00:10<00:43,  5.38s/it] 30%|███       | 3/10 [00:15<00:36,  5.27s/it] 40%|████      | 4/10 [00:21<00:31,  5.20s/it] 50%|█████     | 5/10 [00:26<00:25,  5.18s/it] 50%|█████     | 5/10 [00:31<00:31,  6.27s/it]
+Epoch 0: loss=0.0010, I_compress_bound=0.3300, I_predictive_bound=-0.0007
+Epoch 1: loss=0.0004, I_compress_bound=0.0676, I_predictive_bound=-0.0003
+Epoch 2: loss=0.0003, I_compress_bound=0.0471, I_predictive_bound=-0.0003
+Epoch 3: loss=0.0002, I_compress_bound=0.0288, I_predictive_bound=-0.0002
+Epoch 4: loss=0.0001, I_compress_bound=0.0194, I_predictive_bound=-0.0000
+Epoch 5: loss=0.0001, I_compress_bound=0.0131, I_predictive_bound=-0.0001
+Early stopping...
+dim_idx: 64, R2: [[0.08018706]
+ [0.08056853]
+ [0.0624433 ]]

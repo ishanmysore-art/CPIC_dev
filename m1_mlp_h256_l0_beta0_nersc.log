@@ -1,0 +1,37 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:15<07:24, 15.33s/it]  7%|▋         | 2/30 [00:26<06:07, 13.12s/it] 10%|█         | 3/30 [00:34<04:45, 10.57s/it] 13%|█▎        | 4/30 [00:49<05:16, 12.18s/it] 17%|█▋        | 5/30 [01:03<05:28, 13.13s/it] 20%|██        | 6/30 [01:14<04:50, 12.11s/it] 23%|██▎       | 7/30 [01:28<04:54, 12.82s/it] 27%|██▋       | 8/30 [01:43<04:55, 13.42s/it] 30%|███       | 9/30 [01:58<04:52, 13.92s/it] 33%|███▎      | 10/30 [02:13<04:45, 14.29s/it] 37%|███▋      | 11/30 [02:27<04:31, 14.31s/it] 40%|████      | 12/30 [02:42<04:18, 14.39s/it] 43%|████▎     | 13/30 [02:57<04:10, 14.76s/it] 47%|████▋     | 14/30 [03:12<03:58, 14.92s/it] 50%|█████     | 15/30 [03:29<03:51, 15.41s/it] 53%|█████▎    | 16/30 [03:45<03:37, 15.55s/it] 57%|█████▋    | 17/30 [04:02<03:29, 16.08s/it] 60%|██████    | 18/30 [04:17<03:06, 15.54s/it] 63%|██████▎   | 19/30 [04:35<03:01, 16.52s/it] 67%|██████▋   | 20/30 [04:54<02:51, 17.12s/it] 70%|███████   | 21/30 [05:18<02:52, 19.13s/it] 73%|███████▎  | 22/30 [05:43<02:49, 21.13s/it] 77%|███████▋  | 23/30 [06:12<02:43, 23.41s/it] 80%|████████  | 24/30 [06:39<02:26, 24.39s/it] 83%|████████▎ | 25/30 [07:07<02:07, 25.55s/it] 87%|████████▋ | 26/30 [07:35<01:44, 26.22s/it] 90%|█████████ | 27/30 [08:02<01:19, 26.62s/it] 93%|█████████▎| 28/30 [08:28<00:52, 26.22s/it] 97%|█████████▋| 29/30 [08:55<00:26, 26.64s/it]100%|██████████| 30/30 [09:19<00:00, 25.88s/it]100%|██████████| 30/30 [09:19<00:00, 18.66s/it]
+Epoch 0: loss=0.0007, I_compress_bound=8.4221, I_predictive_bound=-0.0007
+Epoch 1: loss=0.0007, I_compress_bound=8.4575, I_predictive_bound=-0.0007
+Epoch 2: loss=0.0003, I_compress_bound=8.4383, I_predictive_bound=-0.0003
+Epoch 3: loss=0.0002, I_compress_bound=8.4236, I_predictive_bound=-0.0002
+Epoch 4: loss=0.0002, I_compress_bound=8.4370, I_predictive_bound=-0.0002
+Epoch 5: loss=0.0002, I_compress_bound=8.4496, I_predictive_bound=-0.0002
+Epoch 6: loss=0.0001, I_compress_bound=8.4277, I_predictive_bound=-0.0001
+Epoch 7: loss=0.0001, I_compress_bound=8.4378, I_predictive_bound=-0.0001
+Epoch 8: loss=-0.2737, I_compress_bound=83.9608, I_predictive_bound=0.2737
+Epoch 9: loss=-1.1360, I_compress_bound=2861.4544, I_predictive_bound=1.1360
+Epoch 10: loss=-1.6908, I_compress_bound=19964.3673, I_predictive_bound=1.6908
+Epoch 11: loss=-2.0364, I_compress_bound=71257.2301, I_predictive_bound=2.0364
+Epoch 12: loss=-2.3210, I_compress_bound=156268.0379, I_predictive_bound=2.3210
+Epoch 13: loss=-2.5623, I_compress_bound=325655.5200, I_predictive_bound=2.5623
+Epoch 14: loss=-2.7795, I_compress_bound=530913.8449, I_predictive_bound=2.7795
+Epoch 15: loss=-2.9708, I_compress_bound=858040.0537, I_predictive_bound=2.9708
+Epoch 16: loss=-3.1371, I_compress_bound=1401159.0873, I_predictive_bound=3.1371
+Epoch 17: loss=-3.3007, I_compress_bound=2454350.8491, I_predictive_bound=3.3007
+Epoch 18: loss=-3.4382, I_compress_bound=4129580.8797, I_predictive_bound=3.4382
+Epoch 19: loss=-3.5723, I_compress_bound=4718869.4729, I_predictive_bound=3.5723
+Epoch 20: loss=-3.6883, I_compress_bound=7407342.2712, I_predictive_bound=3.6883
+Epoch 21: loss=-3.8012, I_compress_bound=9242873.3443, I_predictive_bound=3.8012
+Epoch 22: loss=-3.9168, I_compress_bound=11231421.3113, I_predictive_bound=3.9168
+Epoch 23: loss=-4.0261, I_compress_bound=12376281.1934, I_predictive_bound=4.0261
+Epoch 24: loss=-4.1176, I_compress_bound=13884050.6887, I_predictive_bound=4.1176
+Epoch 25: loss=-4.2039, I_compress_bound=14214724.9151, I_predictive_bound=4.2039
+Epoch 26: loss=-4.2918, I_compress_bound=15501710.1038, I_predictive_bound=4.2918
+Epoch 27: loss=-4.3640, I_compress_bound=17308363.1698, I_predictive_bound=4.3640
+Epoch 28: loss=-4.4362, I_compress_bound=18461424.2358, I_predictive_bound=4.4362
+Epoch 29: loss=-4.5135, I_compress_bound=20659653.5472, I_predictive_bound=4.5135
+dim_idx: 64, R2: [[0.29796269]
+ [0.31618046]
+ [0.26741986]]

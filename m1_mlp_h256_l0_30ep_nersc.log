@@ -1,0 +1,23 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:15<07:28, 15.46s/it]  7%|▋         | 2/30 [00:30<07:02, 15.08s/it] 10%|█         | 3/30 [00:45<06:49, 15.17s/it] 13%|█▎        | 4/30 [01:01<06:42, 15.49s/it] 17%|█▋        | 5/30 [01:18<06:37, 15.89s/it] 20%|██        | 6/30 [01:35<06:32, 16.35s/it] 23%|██▎       | 7/30 [01:52<06:18, 16.45s/it] 27%|██▋       | 8/30 [02:07<05:52, 16.05s/it] 30%|███       | 9/30 [02:14<04:41, 13.41s/it] 33%|███▎      | 10/30 [02:28<04:31, 13.58s/it] 37%|███▋      | 11/30 [02:43<04:24, 13.91s/it] 40%|████      | 12/30 [02:55<04:01, 13.40s/it] 43%|████▎     | 13/30 [03:00<03:05, 10.89s/it] 47%|████▋     | 14/30 [03:14<03:05, 11.62s/it] 47%|████▋     | 14/30 [03:29<03:59, 14.94s/it]
+Epoch 0: loss=0.0011, I_compress_bound=8.8001, I_predictive_bound=-0.0011
+Epoch 1: loss=0.0004, I_compress_bound=8.7928, I_predictive_bound=-0.0004
+Epoch 2: loss=0.0004, I_compress_bound=8.8043, I_predictive_bound=-0.0004
+Epoch 3: loss=0.0003, I_compress_bound=8.8214, I_predictive_bound=-0.0003
+Epoch 4: loss=0.0002, I_compress_bound=8.7885, I_predictive_bound=-0.0002
+Epoch 5: loss=0.0011, I_compress_bound=8.7800, I_predictive_bound=-0.0002
+Epoch 6: loss=0.0019, I_compress_bound=8.7470, I_predictive_bound=-0.0001
+Epoch 7: loss=0.0028, I_compress_bound=8.7750, I_predictive_bound=-0.0002
+Epoch 8: loss=0.0016, I_compress_bound=3.4224, I_predictive_bound=-0.0003
+Epoch 9: loss=0.0009, I_compress_bound=1.5456, I_predictive_bound=-0.0001
+Epoch 10: loss=0.0009, I_compress_bound=1.0453, I_predictive_bound=-0.0003
+Epoch 11: loss=0.0007, I_compress_bound=0.6548, I_predictive_bound=-0.0002
+Epoch 12: loss=0.0005, I_compress_bound=0.4510, I_predictive_bound=-0.0001
+Epoch 13: loss=0.0005, I_compress_bound=0.3426, I_predictive_bound=-0.0002
+Epoch 14: loss=0.0004, I_compress_bound=0.2465, I_predictive_bound=-0.0002
+Early stopping...
+dim_idx: 64, R2: [[0.09941184]
+ [0.1043294 ]
+ [0.09237107]]

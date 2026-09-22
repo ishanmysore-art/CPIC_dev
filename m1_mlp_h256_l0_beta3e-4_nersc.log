@@ -1,0 +1,37 @@
+warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+Using latent dimensions: [64]
+dim 1 of 1
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:05<02:30,  5.19s/it]  7%|▋         | 2/30 [00:09<02:17,  4.92s/it] 10%|█         | 3/30 [00:14<02:10,  4.84s/it] 13%|█▎        | 4/30 [00:19<02:03,  4.76s/it] 17%|█▋        | 5/30 [00:23<01:57,  4.72s/it] 20%|██        | 6/30 [00:28<01:52,  4.69s/it] 23%|██▎       | 7/30 [00:33<01:47,  4.68s/it] 27%|██▋       | 8/30 [00:37<01:42,  4.67s/it] 30%|███       | 9/30 [00:42<01:37,  4.66s/it] 33%|███▎      | 10/30 [00:47<01:33,  4.66s/it] 37%|███▋      | 11/30 [00:51<01:28,  4.66s/it] 40%|████      | 12/30 [00:56<01:23,  4.66s/it] 43%|████▎     | 13/30 [01:01<01:19,  4.66s/it] 47%|████▋     | 14/30 [01:05<01:14,  4.66s/it] 50%|█████     | 15/30 [01:10<01:09,  4.66s/it] 53%|█████▎    | 16/30 [01:15<01:05,  4.66s/it] 57%|█████▋    | 17/30 [01:19<01:00,  4.65s/it] 60%|██████    | 18/30 [01:24<00:55,  4.65s/it] 63%|██████▎   | 19/30 [01:29<00:51,  4.65s/it] 67%|██████▋   | 20/30 [01:33<00:46,  4.65s/it] 70%|███████   | 21/30 [01:38<00:41,  4.65s/it] 73%|███████▎  | 22/30 [01:42<00:37,  4.64s/it] 77%|███████▋  | 23/30 [01:47<00:32,  4.64s/it] 80%|████████  | 24/30 [01:52<00:27,  4.64s/it] 83%|████████▎ | 25/30 [01:56<00:23,  4.64s/it] 87%|████████▋ | 26/30 [02:01<00:18,  4.64s/it] 90%|█████████ | 27/30 [02:06<00:13,  4.64s/it] 93%|█████████▎| 28/30 [02:10<00:09,  4.64s/it] 97%|█████████▋| 29/30 [02:15<00:04,  4.64s/it]100%|██████████| 30/30 [02:20<00:00,  4.64s/it]100%|██████████| 30/30 [02:20<00:00,  4.67s/it]
+Epoch 0: loss=0.0034, I_compress_bound=8.2514, I_predictive_bound=-0.0009
+Epoch 1: loss=0.0031, I_compress_bound=8.2903, I_predictive_bound=-0.0006
+Epoch 2: loss=0.0028, I_compress_bound=8.2914, I_predictive_bound=-0.0003
+Epoch 3: loss=0.0028, I_compress_bound=8.2750, I_predictive_bound=-0.0003
+Epoch 4: loss=0.0027, I_compress_bound=8.2677, I_predictive_bound=-0.0002
+Epoch 5: loss=0.0026, I_compress_bound=8.2826, I_predictive_bound=-0.0001
+Epoch 6: loss=0.0027, I_compress_bound=8.2958, I_predictive_bound=-0.0002
+Epoch 7: loss=0.0027, I_compress_bound=8.2974, I_predictive_bound=-0.0002
+Epoch 8: loss=0.0013, I_compress_bound=3.6209, I_predictive_bound=-0.0002
+Epoch 9: loss=0.0008, I_compress_bound=1.9639, I_predictive_bound=-0.0002
+Epoch 10: loss=0.0005, I_compress_bound=1.4000, I_predictive_bound=-0.0001
+Epoch 11: loss=0.0005, I_compress_bound=1.1548, I_predictive_bound=-0.0002
+Epoch 12: loss=-0.1711, I_compress_bound=12.5094, I_predictive_bound=0.1749
+Epoch 13: loss=-1.0736, I_compress_bound=100.0579, I_predictive_bound=1.1037
+Epoch 14: loss=-1.5692, I_compress_bound=175.2583, I_predictive_bound=1.6218
+Epoch 15: loss=-1.8585, I_compress_bound=239.0989, I_predictive_bound=1.9303
+Epoch 16: loss=-2.0832, I_compress_bound=298.4317, I_predictive_bound=2.1728
+Epoch 17: loss=-2.2830, I_compress_bound=349.8057, I_predictive_bound=2.3880
+Epoch 18: loss=-2.4399, I_compress_bound=395.9489, I_predictive_bound=2.5587
+Epoch 19: loss=-2.5981, I_compress_bound=445.3405, I_predictive_bound=2.7317
+Epoch 20: loss=-2.7564, I_compress_bound=482.6327, I_predictive_bound=2.9012
+Epoch 21: loss=-2.8996, I_compress_bound=520.1520, I_predictive_bound=3.0557
+Epoch 22: loss=-3.0314, I_compress_bound=533.3547, I_predictive_bound=3.1914
+Epoch 23: loss=-3.1537, I_compress_bound=562.8869, I_predictive_bound=3.3226
+Epoch 24: loss=-3.2634, I_compress_bound=583.7115, I_predictive_bound=3.4385
+Epoch 25: loss=-3.3613, I_compress_bound=588.2210, I_predictive_bound=3.5377
+Epoch 26: loss=-3.4528, I_compress_bound=606.7055, I_predictive_bound=3.6349
+Epoch 27: loss=-3.5420, I_compress_bound=613.4593, I_predictive_bound=3.7260
+Epoch 28: loss=-3.6190, I_compress_bound=637.8257, I_predictive_bound=3.8103
+Epoch 29: loss=-3.6953, I_compress_bound=660.5792, I_predictive_bound=3.8934
+dim_idx: 64, R2: [[0.3005327 ]
+ [0.31524805]
+ [0.26840275]]

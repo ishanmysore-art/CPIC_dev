@@ -106,7 +106,8 @@ def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset
 def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       n_init=1, verbose=False, Kernel=None, xdim=None, beta=1e-3, beta1=1, beta2=0, good_ts=None,
                       standardize_Y=False, train_test_ratio=0.8, regularization_weight=0,
-                      predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent"):
+                      predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent",
+                      hidden_dim=256, n_layers=1):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -200,6 +201,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 "beta": beta,
                 "beta1": beta1,
                 "beta2": beta2,
+                "beta_warmup_epochs": beta_warmup_epochs,
+                "beta_ramp_epochs": beta_ramp_epochs,
                 "device": device,
                 "predictive_space": predictive_space,
                 "predictive_loss": predictive_loss,
@@ -254,6 +257,8 @@ if __name__ == "__main__":
         default=None,
         help='Override latent dimension'
     )
+    parser.add_argument("--hidden-dim", type=int, default=None)
+    parser.add_argument("--n-layers", type=int, default=None)
     args = parser.parse_args()
 
     if args.model == "CPIC":
@@ -341,6 +346,8 @@ if __name__ == "__main__":
     beta = cfg.getfloat('Hyperparameters', 'beta')
     beta1 = cfg.getfloat('Hyperparameters', 'beta1')
     beta2 = cfg.getfloat('Hyperparameters', 'beta2')
+    beta_warmup_epochs = cfg.getint('Hyperparameters', 'beta_warmup_epochs', fallback=0)
+    beta_ramp_epochs = cfg.getint('Hyperparameters', 'beta_ramp_epochs', fallback=0)
     xdim = cfg.getint('Hyperparameters', 'xdim')
     Ts = cfg.get('Hyperparameters', 'T')
     Ts = Ts.split(' ')
@@ -351,11 +358,16 @@ if __name__ == "__main__":
     else:
         n_layers = 1
 
-    hidden_dim = cfg.getint('Hyperparameters', 'hidden_dim')
-    n_layers = cfg.getint(
-        'Hyperparameters',
-        'n_layers',
-        fallback=1
+    hidden_dim = (
+        args.hidden_dim
+        if args.hidden_dim is not None
+        else cfg.getint('Hyperparameters', 'hidden_dim')
+    )
+
+    n_layers = (
+        args.n_layers
+        if args.n_layers is not None
+        else cfg.getint('Hyperparameters', 'n_layers', fallback=1)
     )
 
     estimator_compress = cfg.get('Hyperparameters', 'estimator_compress')
@@ -397,6 +409,9 @@ if __name__ == "__main__":
     num_early_stop = cfg.getint('Training', 'num_early_stop')
     num_vis = cfg.getint('Training', 'num_vis')
     do_dca_init = cfg.getboolean('Training', 'do_dca_init')
+
+    if kernel == "MLP":
+        do_dca_init = False
     device = resolve_device(cfg.get('Training', 'device'))
     if device != cfg.get('Training', 'device'):
         print(f"Using device {device!r} (config requested {cfg.get('Training', 'device')!r})")
@@ -443,6 +458,8 @@ if __name__ == "__main__":
         Kernel = None
     elif kernel == "Polynomial":
         Kernel = Polynomial_expand
+    elif kernel == "MLP":
+        Kernel = None
     else:
         raise ValueError("This kernel is not available.")
 
@@ -452,7 +469,7 @@ if __name__ == "__main__":
                           n_init=n_init, verbose=True, Kernel=Kernel, xdim=xdim, beta=beta, beta1=beta1, beta2=beta2,
                           good_ts=good_ts, standardize_Y=standardize_Y, regularization_weight=regularzation_weight,
                           predictive_loss=predictive_loss, reconstruction_targets=reconstruction_targets,
-                          predictive_space=predictive_space)
+                          predictive_space=predictive_space, hidden_dim=hidden_dim, n_layers=n_layers)
 
         with open(saved_root + "/result_dim{}_standard.pkl".format(ydim), "wb") as f:
             pickle.dump([result_r2, result_MI], f)
