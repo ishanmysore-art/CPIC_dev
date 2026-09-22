@@ -1,37 +1,0 @@
-warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
-Using latent dimensions: [64]
-dim 1 of 1
-  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:15<07:23, 15.31s/it]  7%|▋         | 2/30 [00:31<07:18, 15.66s/it] 10%|█         | 3/30 [00:47<07:14, 16.08s/it] 13%|█▎        | 4/30 [01:04<07:01, 16.20s/it] 17%|█▋        | 5/30 [01:11<05:25, 13.03s/it] 20%|██        | 6/30 [01:27<05:32, 13.86s/it] 23%|██▎       | 7/30 [01:42<05:28, 14.27s/it] 27%|██▋       | 8/30 [01:56<05:13, 14.26s/it] 30%|███       | 9/30 [02:13<05:18, 15.17s/it] 33%|███▎      | 10/30 [02:32<05:23, 16.19s/it] 37%|███▋      | 11/30 [02:48<05:11, 16.41s/it] 40%|████      | 12/30 [03:06<05:01, 16.73s/it] 43%|████▎     | 13/30 [03:23<04:45, 16.81s/it] 47%|████▋     | 14/30 [03:40<04:28, 16.79s/it] 50%|█████     | 15/30 [03:57<04:12, 16.83s/it] 53%|█████▎    | 16/30 [04:13<03:54, 16.76s/it] 57%|█████▋    | 17/30 [04:28<03:30, 16.22s/it] 60%|██████    | 18/30 [04:34<02:38, 13.24s/it] 63%|██████▎   | 19/30 [04:48<02:28, 13.47s/it] 67%|██████▋   | 20/30 [05:03<02:17, 13.73s/it] 70%|███████   | 21/30 [05:17<02:03, 13.77s/it] 73%|███████▎  | 22/30 [05:35<01:59, 14.99s/it] 77%|███████▋  | 23/30 [05:53<01:53, 16.17s/it] 80%|████████  | 24/30 [06:12<01:41, 16.89s/it] 83%|████████▎ | 25/30 [06:31<01:26, 17.40s/it] 87%|████████▋ | 26/30 [06:48<01:09, 17.50s/it] 90%|█████████ | 27/30 [07:06<00:52, 17.42s/it] 93%|█████████▎| 28/30 [07:21<00:33, 16.86s/it] 97%|█████████▋| 29/30 [07:38<00:16, 16.90s/it]100%|██████████| 30/30 [07:53<00:00, 16.34s/it]100%|██████████| 30/30 [07:53<00:00, 15.79s/it]
-Epoch 0: loss=0.0051, I_compress_bound=8.3979, I_predictive_bound=-0.0009
-Epoch 1: loss=0.0047, I_compress_bound=8.3712, I_predictive_bound=-0.0005
-Epoch 2: loss=0.0045, I_compress_bound=8.3986, I_predictive_bound=-0.0003
-Epoch 3: loss=0.0045, I_compress_bound=8.4006, I_predictive_bound=-0.0003
-Epoch 4: loss=0.0044, I_compress_bound=8.3364, I_predictive_bound=-0.0002
-Epoch 5: loss=0.0044, I_compress_bound=8.3924, I_predictive_bound=-0.0002
-Epoch 6: loss=0.0043, I_compress_bound=8.3627, I_predictive_bound=-0.0001
-Epoch 7: loss=0.0044, I_compress_bound=8.3573, I_predictive_bound=-0.0002
-Epoch 8: loss=0.0016, I_compress_bound=2.8662, I_predictive_bound=-0.0002
-Epoch 9: loss=0.0009, I_compress_bound=1.3904, I_predictive_bound=-0.0002
-Epoch 10: loss=0.0008, I_compress_bound=0.9880, I_predictive_bound=-0.0003
-Epoch 11: loss=0.0005, I_compress_bound=0.7274, I_predictive_bound=-0.0002
-Epoch 12: loss=0.0003, I_compress_bound=0.5462, I_predictive_bound=-0.0001
-Epoch 13: loss=0.0004, I_compress_bound=0.5118, I_predictive_bound=-0.0002
-Epoch 14: loss=0.0004, I_compress_bound=0.4045, I_predictive_bound=-0.0002
-Epoch 15: loss=0.0003, I_compress_bound=0.3523, I_predictive_bound=-0.0001
-Epoch 16: loss=0.0002, I_compress_bound=0.2708, I_predictive_bound=-0.0000
-Epoch 17: loss=0.0002, I_compress_bound=0.2823, I_predictive_bound=-0.0001
-Epoch 18: loss=0.0002, I_compress_bound=0.2554, I_predictive_bound=-0.0001
-Epoch 19: loss=0.0002, I_compress_bound=0.2129, I_predictive_bound=-0.0001
-Epoch 20: loss=0.0003, I_compress_bound=0.1816, I_predictive_bound=-0.0002
-Epoch 21: loss=0.0002, I_compress_bound=0.1614, I_predictive_bound=-0.0002
-Epoch 22: loss=0.0002, I_compress_bound=0.1387, I_predictive_bound=-0.0001
-Epoch 23: loss=0.0002, I_compress_bound=0.1299, I_predictive_bound=-0.0001
-Epoch 24: loss=0.0002, I_compress_bound=0.1147, I_predictive_bound=-0.0002
-Epoch 25: loss=0.0002, I_compress_bound=0.1001, I_predictive_bound=-0.0001
-Epoch 26: loss=0.0002, I_compress_bound=0.0958, I_predictive_bound=-0.0002
-Epoch 27: loss=0.0002, I_compress_bound=0.0838, I_predictive_bound=-0.0002
-Epoch 28: loss=0.0002, I_compress_bound=0.0785, I_predictive_bound=-0.0001
-Epoch 29: loss=0.0002, I_compress_bound=0.0741, I_predictive_bound=-0.0001
-dim_idx: 64, R2: [[0.13400995]
- [0.13673832]
- [0.11596262]]

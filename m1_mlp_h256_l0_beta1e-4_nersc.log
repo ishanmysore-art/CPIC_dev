@@ -1,37 +1,0 @@
-warning: The `tool.uv.dev-dependencies` field (used in `/global/u1/i/imysore/CPIC_dev/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
-Using latent dimensions: [64]
-dim 1 of 1
-  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:15<07:18, 15.13s/it]  7%|▋         | 2/30 [00:29<06:53, 14.77s/it] 10%|█         | 3/30 [00:44<06:42, 14.89s/it] 13%|█▎        | 4/30 [00:59<06:27, 14.91s/it] 17%|█▋        | 5/30 [01:14<06:15, 15.03s/it] 20%|██        | 6/30 [01:29<05:59, 14.96s/it] 23%|██▎       | 7/30 [01:46<05:55, 15.44s/it] 27%|██▋       | 8/30 [02:01<05:42, 15.55s/it] 30%|███       | 9/30 [02:16<05:18, 15.15s/it] 33%|███▎      | 10/30 [02:24<04:23, 13.18s/it] 37%|███▋      | 11/30 [02:39<04:20, 13.70s/it] 40%|████      | 12/30 [02:53<04:09, 13.85s/it] 43%|████▎     | 13/30 [03:05<03:44, 13.19s/it] 47%|████▋     | 14/30 [03:19<03:32, 13.26s/it] 50%|█████     | 15/30 [03:32<03:21, 13.41s/it] 53%|█████▎    | 16/30 [03:46<03:10, 13.59s/it] 57%|█████▋    | 17/30 [03:55<02:36, 12.02s/it] 60%|██████    | 18/30 [04:02<02:06, 10.57s/it] 63%|██████▎   | 19/30 [04:08<01:42,  9.30s/it] 67%|██████▋   | 20/30 [04:24<01:51, 11.15s/it] 70%|███████   | 21/30 [04:41<01:55, 12.86s/it] 73%|███████▎  | 22/30 [04:58<01:53, 14.16s/it] 77%|███████▋  | 23/30 [05:15<01:44, 14.97s/it] 80%|████████  | 24/30 [05:32<01:34, 15.70s/it] 83%|████████▎ | 25/30 [05:48<01:19, 15.93s/it] 87%|████████▋ | 26/30 [06:06<01:05, 16.44s/it] 90%|█████████ | 27/30 [06:24<00:50, 16.94s/it] 93%|█████████▎| 28/30 [06:42<00:34, 17.23s/it] 97%|█████████▋| 29/30 [06:55<00:16, 16.06s/it]100%|██████████| 30/30 [07:07<00:00, 14.64s/it]100%|██████████| 30/30 [07:07<00:00, 14.24s/it]
-Epoch 0: loss=0.0011, I_compress_bound=8.2817, I_predictive_bound=-0.0010
-Epoch 1: loss=0.0007, I_compress_bound=8.2240, I_predictive_bound=-0.0006
-Epoch 2: loss=0.0004, I_compress_bound=8.2772, I_predictive_bound=-0.0003
-Epoch 3: loss=0.0003, I_compress_bound=8.2372, I_predictive_bound=-0.0002
-Epoch 4: loss=0.0003, I_compress_bound=8.2766, I_predictive_bound=-0.0002
-Epoch 5: loss=0.0003, I_compress_bound=8.2329, I_predictive_bound=-0.0002
-Epoch 6: loss=0.0003, I_compress_bound=8.2700, I_predictive_bound=-0.0002
-Epoch 7: loss=0.0002, I_compress_bound=8.2385, I_predictive_bound=-0.0001
-Epoch 8: loss=-0.2407, I_compress_bound=58.0856, I_predictive_bound=0.2413
-Epoch 9: loss=-1.1360, I_compress_bound=639.0937, I_predictive_bound=1.1424
-Epoch 10: loss=-1.6579, I_compress_bound=1085.2238, I_predictive_bound=1.6687
-Epoch 11: loss=-2.0029, I_compress_bound=1378.3059, I_predictive_bound=2.0167
-Epoch 12: loss=-2.2941, I_compress_bound=1563.5470, I_predictive_bound=2.3098
-Epoch 13: loss=-2.5370, I_compress_bound=1826.8470, I_predictive_bound=2.5552
-Epoch 14: loss=-2.7616, I_compress_bound=1698.7668, I_predictive_bound=2.7785
-Epoch 15: loss=-2.9553, I_compress_bound=1832.6184, I_predictive_bound=2.9737
-Epoch 16: loss=-3.1255, I_compress_bound=1956.5304, I_predictive_bound=3.1450
-Epoch 17: loss=-3.2662, I_compress_bound=2224.6763, I_predictive_bound=3.2884
-Epoch 18: loss=-3.3991, I_compress_bound=2279.4722, I_predictive_bound=3.4219
-Epoch 19: loss=-3.5332, I_compress_bound=2050.4255, I_predictive_bound=3.5537
-Epoch 20: loss=-3.6568, I_compress_bound=2584.4901, I_predictive_bound=3.6827
-Epoch 21: loss=-3.7638, I_compress_bound=2058.6117, I_predictive_bound=3.7844
-Epoch 22: loss=-3.8781, I_compress_bound=2369.6885, I_predictive_bound=3.9018
-Epoch 23: loss=-3.9666, I_compress_bound=2434.6723, I_predictive_bound=3.9909
-Epoch 24: loss=-4.0642, I_compress_bound=2369.5005, I_predictive_bound=4.0879
-Epoch 25: loss=-4.1507, I_compress_bound=3200.2861, I_predictive_bound=4.1827
-Epoch 26: loss=-4.2317, I_compress_bound=2586.2098, I_predictive_bound=4.2576
-Epoch 27: loss=-4.3116, I_compress_bound=2847.4729, I_predictive_bound=4.3401
-Epoch 28: loss=-4.3856, I_compress_bound=3035.0652, I_predictive_bound=4.4159
-Epoch 29: loss=-4.4499, I_compress_bound=2430.4889, I_predictive_bound=4.4742
-dim_idx: 64, R2: [[0.30084642]
- [0.31832465]
- [0.26523695]]
