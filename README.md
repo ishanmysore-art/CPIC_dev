@@ -310,4 +310,4 @@ Then open the URL TensorBoard prints (by default `http://localhost:6006/`). To v
 uv run tensorboard --logdir res/video_sparse_cpic/tensor_logs/20260513120000
 ```
 
-Replace `res/video_sparse_cpic` with your `saved_root` if you changed it in the INI.
+Replace `res/video_sparse_cpic` with your `saved_root` if you changed it in the INI.# CPIC_dev
