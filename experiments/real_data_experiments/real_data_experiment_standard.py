@@ -127,6 +127,17 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
     min_std = 1e-6
     good_cols = (X.std(axis=0) > min_std)
     X = X[:, good_cols]
+
+    actual_xdim = X.shape[-1]
+
+    if xdim is not None and xdim != actual_xdim:
+        print(
+            f"Warning: configured xdim={xdim}, "
+            f"but processed data has {actual_xdim} features."
+        )
+
+    xdim = actual_xdim
+
     if good_ts is not None:
         X = X[:good_ts]
         Y = Y[:good_ts]
