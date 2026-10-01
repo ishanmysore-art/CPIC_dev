@@ -2,6 +2,8 @@ import argparse
 from configparser import ConfigParser
 import os
 from pathlib import Path
+import random
+import time
 
 import torch
 from cpic.exp_utils import data_util
@@ -124,6 +126,11 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
     results_MI_size = (len(dim_vals), len(T_pi_vals), 2)
     results_r2 = np.zeros(results_r2_size)
     results_MI = np.zeros(results_MI_size)
+
+    results_runtime = np.zeros((len(dim_vals), len(T_pi_vals)))
+    results_peak_memory = np.zeros((len(dim_vals), len(T_pi_vals)))
+
+
     min_std = 1e-6
     good_cols = (X.std(axis=0) > min_std)
     X = X[:, good_cols]
@@ -227,6 +234,14 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
 
             CPIC_model = CPIC(**cpic_kwargs)
             CPIC_model = CPIC_model.to(device)
+
+            # Measure CPIC training cost only
+            if str(device).startswith("cuda"):
+                torch.cuda.synchronize()
+                torch.cuda.reset_peak_memory_stats()
+
+            train_start = time.perf_counter()
+
             _, I_compress, I_predictive = CPIC_model.fit(
                 train_data,
                 init_weights=init_weights,
@@ -236,6 +251,25 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 early_stop=num_early_stop,
                 verbose=verbose,
             )
+
+            if str(device).startswith("cuda"):
+                torch.cuda.synchronize()
+
+            train_runtime = time.perf_counter() - train_start
+
+            if str(device).startswith("cuda"):
+                peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            else:
+                peak_memory_mb = 0.0
+
+            results_runtime[dim_idx, T_pi_idx] = train_runtime
+            results_peak_memory[dim_idx, T_pi_idx] = peak_memory_mb
+
+            print(
+                f"Training runtime: {train_runtime:.2f}s | "
+                f"Peak GPU memory: {peak_memory_mb:.1f} MB"
+            )
+            
             results_MI[dim_idx, T_pi_idx, 0] = I_compress
             results_MI[dim_idx, T_pi_idx, 1] = I_predictive
 
@@ -255,22 +289,27 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 # r2_dca = linear_decode_r2(X_train_dca, Y_train, X_test_dca, Y_test, decoding_window=decoding_window, offset=offset)
                 results_r2[dim_idx, offset_idx, T_pi_idx] = r2_cpic
         print("dim_idx: {}, R2: {}".format(dim_vals[dim_idx], results_r2[dim_idx]))
-    return results_r2, results_MI
+    return results_r2, results_MI, results_runtime, results_peak_memory
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CPIC for real data.')
     parser.add_argument('--config', type=str, default="hc_stochastic_infonce_alt")
     parser.add_argument('--model', type=str, default="CPIC")
-    parser.add_argument(
-        '--ydim',
-        type=int,
-        default=None,
-        help='Override latent dimension'
-    )
+    parser.add_argument('--ydim', type=int, default=None, help='Override latent dimension')
     parser.add_argument("--hidden-dim", type=int, default=None)
     parser.add_argument("--n-layers", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducible experiments")
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    print(f"Using random seed: {args.seed}")
 
     if args.model == "CPIC":
         from cpic.CPIC import CPIC
@@ -349,7 +388,8 @@ if __name__ == "__main__":
     print("Using latent dimensions:", ydims)
 
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
-    saved_root = cfg.get('User', 'saved_root')
+    if args.config == "m1_stochastic_infonce":
+        saved_root = "res/m1_scaling_benchmark"
     if not os.path.exists(saved_root):
         os.makedirs(saved_root, exist_ok=True)
 
@@ -476,12 +516,42 @@ if __name__ == "__main__":
 
     for ydim in ydims:
         regularzation_weight = 0
-        result_r2, result_MI = run_analysis_cpic(X, Y, T_pi_vals, dim_vals=[ydim], offset_vals=offsets, decoding_window=win,
+        result_r2, result_MI, result_runtime, result_peak_memory = run_analysis_cpic(X, Y, T_pi_vals, dim_vals=[ydim], offset_vals=offsets, decoding_window=win,
                           n_init=n_init, verbose=True, Kernel=Kernel, xdim=xdim, beta=beta, beta1=beta1, beta2=beta2,
                           good_ts=good_ts, standardize_Y=standardize_Y, regularization_weight=regularzation_weight,
                           predictive_loss=predictive_loss, reconstruction_targets=reconstruction_targets,
                           predictive_space=predictive_space, hidden_dim=hidden_dim, n_layers=n_layers)
 
-        with open(saved_root + "/result_dim{}_standard.pkl".format(ydim), "wb") as f:
-            pickle.dump([result_r2, result_MI], f)
+        result = {
+            "ydim": int(ydim),
+            "seed": int(args.seed),
+
+            "r2": result_r2,
+            "mi": result_MI,
+
+            "train_runtime_seconds": result_runtime,
+            "peak_gpu_memory_mb": result_peak_memory,
+
+            "config": {
+                "dataset": "indy_20160627_01",
+                "xdim": int(xdim),
+                "T": list(T_pi_vals),
+                "hidden_dim": int(hidden_dim),
+                "n_layers": int(n_layers),
+                "beta": float(beta),
+                "batch_size": int(batch_size),
+                "num_epochs": int(num_epochs),
+                "lr": float(lr),
+            },
+        }
+
+        output_file = os.path.join(
+            saved_root,
+            f"result_ydim{ydim}_seed{args.seed}.pkl"
+        )
+
+        with open(output_file, "wb") as f:
+            pickle.dump(result, f)
+
+        print(f"Saved benchmark result to: {output_file}")
         # import pdb; pdb.set_trace()
