@@ -324,6 +324,10 @@ if __name__ == "__main__":
         config_file = 'config/config_m1_stochastic_infonce.ini'
         ydims = np.array([5]).astype(int)
 
+    elif args.config == 'm1_scaling_benchmark':
+        config_file = 'config/config_m1_scaling_benchmark.ini'
+        ydims = np.array([32]).astype(int)
+
     elif args.config == 'm1_stochastic_infonce_alt':
         config_file = 'config/config_m1_stochastic_infonce_alt.ini'
         ydims = np.array([5]).astype(int)
@@ -468,8 +472,12 @@ if __name__ == "__main__":
         print(f"Using device {device!r} (config requested {cfg.get('Training', 'device')!r})")
     lr = cfg.getfloat('Training', 'lr')
 
-    if args.config == "m1_stochastic_infonce" or args.config == "m1_stochastic_infonce_alt" \
-            or args.config == "m1_deterministic_infonce_alt":
+    if args.config in (
+        "m1_stochastic_infonce",
+        "m1_stochastic_infonce_alt",
+        "m1_deterministic_infonce_alt",
+        "m1_scaling_benchmark",
+    ):
         M1 = data_util.load_sabes_data(data_path('data', 'real_data', 'M1', 'indy_20160627_01.mat'))
         X, Y = M1['M1'], M1['cursor']
         good_ts = None
