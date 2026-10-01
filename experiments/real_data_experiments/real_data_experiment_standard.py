@@ -392,8 +392,8 @@ if __name__ == "__main__":
     print("Using latent dimensions:", ydims)
 
     RESULTS_FILENAME = cfg.get('User', 'RESULTS_FILENAME')
-    if args.config == "m1_stochastic_infonce":
-        saved_root = "res/m1_scaling_benchmark"
+    saved_root = cfg.get('User', 'saved_root')
+
     if not os.path.exists(saved_root):
         os.makedirs(saved_root, exist_ok=True)
 
