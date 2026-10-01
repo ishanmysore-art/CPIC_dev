@@ -590,7 +590,7 @@ class CPIC(nn.Module):
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None, check_grad_finite=False):
         """
         Fit the CPIC model to the data X.
 
@@ -725,11 +725,14 @@ class CPIC(nn.Module):
 
                 # Check if gradients are NaN
                 grad_bool = True
-                for name, param in ((n, p) for n, p in self.named_parameters() if p.requires_grad):
-                    if not torch.isfinite(param.grad).all():
-                        print(epoch, name, torch.isfinite(param.grad).all())
-                        grad_bool = False
-                        break
+                if check_grad_finite:
+                    for name, param in ((n, p) for n, p in self.named_parameters()
+                        if p.requires_grad and p.grad is not None):
+                        if not torch.isfinite(param.grad).all():
+                            print(f"Non-finite gradient at epoch {epoch}: {name}")
+                            grad_bool = False
+                            break
+
                 if not grad_bool:
                     break
                 if do_init and epoch < (epochs / 4):
@@ -746,13 +749,13 @@ class CPIC(nn.Module):
                         writer.add_scalar("batch/I_predictive", I_predictive_bound.item(), global_step)
                     global_step += 1
 
-                loss_by_epoch.append(loss.item())
-                I_compress_bound_by_epoch.append(I_compress_bound.item())
-                I_predictive_bound_by_epoch.append(I_predictive_bound.item())
+                loss_by_epoch.append(loss.detach())
+                I_compress_bound_by_epoch.append(I_compress_bound.detach())
+                I_predictive_bound_by_epoch.append(I_predictive_bound.detach())
             
-            mean_loss = np.mean(loss_by_epoch)
-            mean_I_compress = np.mean(I_compress_bound_by_epoch)
-            mean_I_predictive = np.mean(I_predictive_bound_by_epoch)
+            mean_loss = torch.stack(loss_by_epoch).mean().item()
+            mean_I_compress = torch.stack(I_compress_bound_by_epoch).mean().item()
+            mean_I_predictive = torch.stack(I_predictive_bound_by_epoch).mean().item()
             self.final_mean_I_compress = float(mean_I_compress)
             self.final_mean_I_predictive = float(mean_I_predictive)
             print(

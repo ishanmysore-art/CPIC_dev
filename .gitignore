@@ -45,3 +45,4 @@ experiments/real_data_experiments/m1_stochastic_infonce_reproduction.log
 # NERSC experiment outputs
 *_nersc.log
 logs/
+benchmarks/
