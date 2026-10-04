@@ -139,7 +139,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       n_init=1, verbose=False, Kernel=None, xdim=None, beta=1e-3, beta1=1, beta2=0, good_ts=None,
                       standardize_Y=False, train_test_ratio=0.8, regularization_weight=0,
                       predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent",
-                      hidden_dim=256, n_layers=1, neuron_dropout_p=0.0, neuron_dropout_seed=0, eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242):
+                      hidden_dim=256, n_layers=1, neuron_dropout_p=0.0, neuron_dropout_seed=0, 
+                      eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242, availability_mask=False):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -194,12 +195,40 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
     actual_xdim = X.shape[-1]
 
     if xdim is not None and xdim != actual_xdim:
-        print(
-            f"Warning: configured xdim={xdim}, "
-            f"but processed data has {actual_xdim} features."
-        )
+        print(f"Warning: configured xdim={xdim}, "
+            f"but processed data has {actual_xdim} features.")
 
-    xdim = actual_xdim
+    # Number of actual neural channels after preprocessing.
+    neural_xdim = actual_xdim
+    xdim = neural_xdim
+
+    # For this controlled experiment, availability-mask augmentation
+    # is only supported on the original neural feature space.
+    if availability_mask and Kernel is not None:
+        raise ValueError("availability_mask is currently supported only with Kernel=None")
+
+    # Mask-aware CPIC receives:
+    # [neural activity, binary availability mask]
+    encoder_xdim = (2 * neural_xdim if availability_mask else neural_xdim)
+
+    def build_encoder_input(Xi, neuron_mask):
+        """
+        Zero-fill unavailable neurons and optionally append
+        the binary neuron-availability mask.
+        """
+        X_masked = Xi * neuron_mask
+
+        if not availability_mask:
+            return X_masked
+
+        availability = np.broadcast_to(neuron_mask, Xi.shape,).astype(Xi.dtype, copy=False)
+
+        return np.concatenate([X_masked, availability], axis=-1,)
+
+    if availability_mask:
+        print(f"Mask-aware encoder enabled: "
+            f"{neural_xdim} neural dims -> "
+            f"{encoder_xdim} encoder input dims")
 
     if good_ts is not None:
         X = X[:good_ts]
@@ -207,6 +236,9 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
 
     if Kernel is not None:
         xdim = int(xdim + xdim * (xdim + 1) / 2)  # polynomial
+        encoder_xdim = xdim
+
+
 
     n = X.shape[0]
     n_train = int(n * train_test_ratio)
@@ -242,13 +274,21 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
         for T_pi_idx in range(len(T_pi_vals)):
             T_pi = T_pi_vals[T_pi_idx]
             critic_params = {"x_dim": T_pi * dim, "y_dim": T_pi * dim, "hidden_dim": hidden_dim,}
-            critic_params_YX = {"x_dim": T_pi * dim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim,}
+            critic_params_YX = {"x_dim": T_pi * dim, "y_dim": T_pi * encoder_xdim, "hidden_dim": hidden_dim,}
 
             if predictive_loss == "mi" and predictive_space == "observation":
-                critic_params = {"x_dim": T_pi * dim, "y_dim": T_pi * xdim, "hidden_dim": hidden_dim,}
+                critic_params = {"x_dim": T_pi * dim, "y_dim": T_pi * encoder_xdim, "hidden_dim": hidden_dim,}
             # train data
             if do_dca_init:
-                init_weights = DCA_init(np.concatenate(X_train_ctd, axis=0), T=T_pi, d=dim, n_init=n_init)
+                init_weights = DCA_init(np.concatenate(X_train_ctd, axis=0), T=T_pi, d=dim, n_init=n_init,)
+
+                if availability_mask:
+                    # DCA is fit only on the original neural channels.
+                    # The new availability-mask inputs start with zero influence.
+                    init_weights = np.concatenate([init_weights, np.zeros_like(init_weights),], axis=0,)
+
+                    print(f"DCA init augmented for availability mask: "
+                          f"{init_weights.shape}")
             else:
                 init_weights = None
 
@@ -266,7 +306,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
 
             cpic_kwargs = {
                 "ydim": dim,
-                "xdim": xdim,
+                "xdim": encoder_xdim,
                 "T": T_pi,
                 "mi_params": mi_params,
                 "baseline_params": baseline_params,
@@ -308,6 +348,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 verbose=verbose,
                 neuron_dropout_p=neuron_dropout_p,
                 neuron_dropout_seed=neuron_dropout_seed,
+                availability_mask=availability_mask,
             )
 
             if str(device).startswith("cuda"):
@@ -331,14 +372,19 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
             results_MI[dim_idx, T_pi_idx, 0] = I_compress
             results_MI[dim_idx, T_pi_idx, 1] = I_predictive
 
-            # encode train data and test data via CPIC
-            X_train_cpic = [CPIC_model.encode(torch.from_numpy(Xi).to(torch.float).to(device)) for Xi in X_train_ctd]
-            X_train_cpic = [Xi.cpu().detach().numpy() for Xi in X_train_cpic]
-            # X_train_dca = [np.dot(Xi, init_weights) for Xi in X_train_ctd]
-            X_test_cpic = CPIC_model.encode(torch.from_numpy(X_test_ctd).to(torch.float).to(device))
-            X_test_cpic = X_test_cpic.cpu().detach().numpy()
-            # X_test_dca = np.dot(X_test_ctd, init_weights)
-            ### save encoded test data
+            # Encode complete-neuron train/test data via CPIC.
+            # For mask-aware CPIC, all neurons are explicitly marked available.
+            full_neuron_mask = np.ones(neural_xdim, dtype=np.float32)
+
+            X_train_encoder = [build_encoder_input(Xi, full_neuron_mask) for Xi in X_train_ctd]
+
+            X_test_encoder = build_encoder_input(X_test_ctd, full_neuron_mask,)
+
+            with torch.no_grad():
+                X_train_cpic = [CPIC_model.encode(torch.from_numpy(Xi).to(torch.float).to(device)).cpu().numpy()
+                                for Xi in X_train_encoder]
+
+                X_test_cpic = CPIC_model.encode(torch.from_numpy(X_test_encoder).to(torch.float).to(device)).cpu().numpy()
 
 
             # Standard evaluation: fit and test using the complete-neuron data.
@@ -384,7 +430,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                         f"eval missingness must satisfy 0 <= p < 1; got {missing_p}"
                     )
 
-                n_missing = int(round(float(missing_p) * xdim))
+                n_missing = int(round(float(missing_p) * neural_xdim))
 
                 for mask_rep in range(eval_mask_reps):
                     # Seed depends ONLY on evaluation settings, not
@@ -399,12 +445,12 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                     )
                     eval_rng = np.random.default_rng(seed_sequence)
 
-                    neuron_mask = np.ones(xdim, dtype=np.float32)
+                    neuron_mask = np.ones(neural_xdim, dtype=np.float32)
 
                     if n_missing > 0:
                         dropped_neurons = np.sort(
                             eval_rng.choice(
-                                xdim,
+                                neural_xdim,
                                 size=n_missing,
                                 replace=False,
                             )
@@ -413,11 +459,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                     else:
                         dropped_neurons = np.array([], dtype=int)
 
-                    # Same missing neurons across the ENTIRE pseudo-session.
-                    X_train_eval = [
-                        Xi * neuron_mask for Xi in X_train_ctd
-                    ]
-                    X_test_eval = X_test_ctd * neuron_mask
+                    X_train_eval = [build_encoder_input(Xi, neuron_mask) for Xi in X_train_ctd]
+                    X_test_eval = build_encoder_input(X_test_ctd, neuron_mask,)
 
                     with torch.no_grad():
                         X_train_eval_cpic = [
@@ -492,7 +535,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                     print(
                         f"Mask eval | missing={missing_p:.2f} "
                         f"| rep={mask_rep} "
-                        f"| dropped={n_missing}/{xdim} "
+                        f"| dropped={n_missing}/{neural_xdim} "
                         f"| refit_mean_R2={np.mean(rep_r2):.6f} "
                         f"| frozen_mean_R2={np.mean(frozen_rep_r2):.6f}"
                     )
@@ -562,6 +605,16 @@ if __name__ == "__main__":
         default=4242,
         help="Seed defining fixed pseudo-session evaluation masks",
     )
+
+    parser.add_argument(
+        "--availability-mask",
+        action="store_true",
+        help=(
+            "Append a binary neuron-availability mask to CPIC input. "
+            "Missing neural values remain zero-filled."
+        ),
+    )
+
     args = parser.parse_args()
 
     eval_missing_ps = tuple(
@@ -817,7 +870,8 @@ if __name__ == "__main__":
                           neuron_dropout_seed=args.train_mask_seed,
                           eval_missing_ps=eval_missing_ps,
                           eval_mask_reps=args.eval_mask_reps,
-                          eval_mask_seed=args.eval_mask_seed)
+                          eval_mask_seed=args.eval_mask_seed,
+                          availability_mask=args.availability_mask)
 
         result = {
             "ydim": int(ydim),
@@ -841,6 +895,7 @@ if __name__ == "__main__":
                 "eval_missing_ps": [float(p) for p in eval_missing_ps],
                 "eval_mask_reps": int(args.eval_mask_reps),
                 "eval_mask_seed": int(args.eval_mask_seed),
+                "availability_mask": bool(args.availability_mask),
             },
 
             "train_runtime_seconds": result_runtime,
@@ -856,12 +911,16 @@ if __name__ == "__main__":
                 "batch_size": int(batch_size),
                 "num_epochs": int(num_epochs),
                 "lr": float(lr),
+                "encoder_xdim": int(xdim * (2 if args.availability_mask else 1)),
             },
         }
 
+        mask_tag = "_availmask" if args.availability_mask else ""
+
         output_file = os.path.join(
             saved_root,
-            f"result_ydim{ydim}_seed{args.seed}_traindrop{int(round(args.neuron_dropout_p * 100)):03d}.pkl"
+            f"result_ydim{ydim}_seed{args.seed}_traindrop"
+            f"{int(round(args.neuron_dropout_p * 100)):03d}{mask_tag}.pkl"
         )
 
         with open(output_file, "wb") as f:

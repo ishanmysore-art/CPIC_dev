@@ -590,7 +590,8 @@ class CPIC(nn.Module):
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True,
+            epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0, availability_mask=False):
         """
         Fit the CPIC model to the data X.
 
@@ -727,30 +728,50 @@ class CPIC(nn.Module):
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
 
                 # Simulate a recording/session with missing neurons.
-                # One mask is shared by every window in this minibatch and is
-                # constant across time. The same neurons are absent from the
-                # corresponding past and future windows.
-                if neuron_dropout_p > 0.0:
-                    neuron_mask = (
-                        torch.rand(
-                            1,
-                            1,
-                            X_past_batch.shape[-1],
-                            device=self.device,
-                            generator=neuron_dropout_generator,
-                        ) >= neuron_dropout_p
-                    ).to(X_past_batch.dtype)
+                #
+                # One mask is shared by every window in this minibatch,
+                # constant across time, and identical for past/future.
+                #
+                # When availability_mask=True, append the binary neuron
+                # availability vector as extra input features:
+                #
+                #   [masked neural activity, availability mask]
+                #
+                # Thus N neural dimensions become 2N encoder inputs.
+                if neuron_dropout_p > 0.0 or availability_mask:
+                    n_neurons = X_past_batch.shape[-1]
+
+                    if neuron_dropout_p > 0.0:
+                        neuron_mask = (torch.rand(1, 1, n_neurons, device=self.device,
+                                                  generator=neuron_dropout_generator,)
+                                                  >= neuron_dropout_p).to(X_past_batch.dtype)
+                    else:
+                        neuron_mask = torch.ones(1, 1, n_neurons, device=self.device, dtype=X_past_batch.dtype,)
 
                     X_past_batch = X_past_batch * neuron_mask
                     X_future_batch = X_future_batch * neuron_mask
 
-                    # Print one concrete sanity check at the beginning of training.
+                    n_kept = int(neuron_mask.sum().item())
+
+                    if availability_mask:
+                        past_availability = neuron_mask.expand_as(X_past_batch)
+                        future_availability = neuron_mask.expand_as(X_future_batch)
+
+                        X_past_batch = torch.cat(
+                            [X_past_batch, past_availability],
+                            dim=-1,
+                        )
+                        X_future_batch = torch.cat(
+                            [X_future_batch, future_availability],
+                            dim=-1,
+                        )
+
                     if epoch == 0 and len(loss_by_epoch) == 0:
-                        n_kept = int(neuron_mask.sum().item())
-                        n_total = X_past_batch.shape[-1]
                         print(
                             f"Neuron dropout p={neuron_dropout_p:.2f}: "
-                            f"first batch keeps {n_kept}/{n_total} neurons"
+                            f"first batch keeps {n_kept}/{n_neurons} neurons | "
+                            f"availability_mask={availability_mask} | "
+                            f"encoder_input_dim={X_past_batch.shape[-1]}"
                         )
 
                 loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
