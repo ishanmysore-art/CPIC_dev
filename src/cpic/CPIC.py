@@ -590,7 +590,7 @@ class CPIC(nn.Module):
         return self.encoded_past_mean_stats, self.encoded_future_mean_stats
 
 
-    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None, check_grad_finite=False):
+    def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True, epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0):
         """
         Fit the CPIC model to the data X.
 
@@ -627,6 +627,17 @@ class CPIC(nn.Module):
             a larger dedicated LR lets them reach their asymptote in far fewer
             epochs. No effect on encoders without gate logits. The default is None.
         """
+        if not 0.0 <= neuron_dropout_p < 1.0:
+            raise ValueError(
+                f"neuron_dropout_p must satisfy 0 <= p < 1; got {neuron_dropout_p}"
+            )
+
+        neuron_dropout_generator = None
+        if neuron_dropout_p > 0.0:
+            generator_device = "cuda" if str(self.device).startswith("cuda") else "cpu"
+            neuron_dropout_generator = torch.Generator(device=generator_device)
+            neuron_dropout_generator.manual_seed(int(neuron_dropout_seed))
+
         train_loader = DataLoader(X, batch_size=batch_size, shuffle=True)
         infonce_upper_keys = [
             k for k in ("estimator_compress", "estimator_predictive")
@@ -714,6 +725,33 @@ class CPIC(nn.Module):
             for X_past_batch, X_future_batch in train_loader:
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
+
+                # Simulate a recording/session with missing neurons.
+                # One mask is shared by every window in this minibatch and is
+                # constant across time. The same neurons are absent from the
+                # corresponding past and future windows.
+                if neuron_dropout_p > 0.0:
+                    neuron_mask = (
+                        torch.rand(
+                            1,
+                            1,
+                            X_past_batch.shape[-1],
+                            device=self.device,
+                            generator=neuron_dropout_generator,
+                        ) >= neuron_dropout_p
+                    ).to(X_past_batch.dtype)
+
+                    X_past_batch = X_past_batch * neuron_mask
+                    X_future_batch = X_future_batch * neuron_mask
+
+                    # Print one concrete sanity check at the beginning of training.
+                    if epoch == 0 and len(loss_by_epoch) == 0:
+                        n_kept = int(neuron_mask.sum().item())
+                        n_total = X_past_batch.shape[-1]
+                        print(
+                            f"Neuron dropout p={neuron_dropout_p:.2f}: "
+                            f"first batch keeps {n_kept}/{n_total} neurons"
+                        )
 
                 loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
 

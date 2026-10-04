@@ -28,88 +28,118 @@ class myconf(ConfigParser):
         return optionstr
 
 
-def linear_decode_r2(X_train, Y_train, X_test, Y_test, decoding_window=1, offset=0):
-    """Train a linear model on the training set and test on the test set.
-    This will work with batched training data and/or batched test data.
-    X_train : ndarray (time, channels) or (batches, time, channels)
-        Feature training data for regression.
-    Y_train : ndarray (time, channels) or (batches, time, channels)
-        Target training data for regression.
-    X_test : ndarray (time, channels) or (batches, time, channels)
-        Feature test data for regression.
-    Y_test : ndarray (time, channels) or (batches, time, channels)
-        Target test data for regression.
-    decoding_window : int
-        Number of time samples of X to use for predicting Y (should be odd). Centered around
-        offset value.
-    offset : int
-        Temporal offset for prediction (0 is same-time prediction).
+def prepare_linear_decode_data(X, Y, decoding_window=1, offset=0):
     """
-
-    if isinstance(X_train, np.ndarray) and X_train.ndim == 2:
-        X_train = [X_train]
-    if isinstance(Y_train, np.ndarray) and Y_train.ndim == 2:
-        Y_train = [Y_train]
-
-    if isinstance(X_test, np.ndarray) and X_test.ndim == 2:
-        X_test = [X_test]
-    if isinstance(Y_test, np.ndarray) and Y_test.ndim == 2:
-        Y_test = [Y_test]
-
-    X_train_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_train]
-    X_test_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X_test]
-
-    Y_train = [Yi[decoding_window // 2:] for Yi in Y_train]
-    Y_train = [Yi[:len(Xi)] for Yi, Xi in zip(Y_train, X_train_lags)]
-    if offset >= 0:
-        Y_train = [Yi[offset:] for Yi in Y_train]
+    Apply the exact lag/offset alignment used by linear_decode_r2,
+    but do not fit a regression model.
+    """
+    if isinstance(X, np.ndarray) and X.ndim == 2:
+        X = [X]
     else:
-        Y_train = [Yi[:Yi.shape[0] + offset] for Yi in Y_train]
+        X = list(X)
 
-    Y_test = [Yi[decoding_window // 2:] for Yi in Y_test]
-    Y_test = [Yi[:len(Xi)] for Yi, Xi in zip(Y_test, X_test_lags)]
-    if offset >= 0:
-        Y_test = [Yi[offset:] for Yi in Y_test]
+    if isinstance(Y, np.ndarray) and Y.ndim == 2:
+        Y = [Y]
     else:
-        Y_test = [Yi[:Yi.shape[0] + offset] for Yi in Y_test]
+        Y = list(Y)
+
+    X_lags = [form_lag_matrix(Xi, decoding_window) for Xi in X]
+
+    Y_aligned = [Yi[decoding_window // 2:] for Yi in Y]
+    Y_aligned = [
+        Yi[:len(Xi)]
+        for Yi, Xi in zip(Y_aligned, X_lags)
+    ]
 
     if offset >= 0:
-        X_train_lags = [Xi[:Xi.shape[0] - offset] for Xi in X_train_lags]
-        X_test_lags = [Xi[:Xi.shape[0] - offset] for Xi in X_test_lags]
+        Y_aligned = [Yi[offset:] for Yi in Y_aligned]
+        X_lags = [Xi[:Xi.shape[0] - offset] for Xi in X_lags]
     else:
-        X_train_lags = [Xi[-offset:] for Xi in X_train_lags]
-        X_test_lags = [Xi[-offset:] for Xi in X_test_lags]
+        Y_aligned = [
+            Yi[:Yi.shape[0] + offset]
+            for Yi in Y_aligned
+        ]
+        X_lags = [Xi[-offset:] for Xi in X_lags]
 
-    if len(X_train_lags) == 1:
-        X_train_lags = X_train_lags[0]
+    if len(X_lags) == 1:
+        X_lags = X_lags[0]
     else:
-        X_train_lags = np.concatenate(X_train_lags)
+        X_lags = np.concatenate(X_lags)
 
-    if len(Y_train) == 1:
-        Y_train = Y_train[0]
+    if len(Y_aligned) == 1:
+        Y_aligned = Y_aligned[0]
     else:
-        Y_train = np.concatenate(Y_train)
+        Y_aligned = np.concatenate(Y_aligned)
 
-    if len(X_test_lags) == 1:
-        X_test_lags = X_test_lags[0]
-    else:
-        X_test_lags = np.concatenate(X_test_lags)
+    return X_lags, Y_aligned
 
-    if len(Y_test) == 1:
-        Y_test = Y_test[0]
-    else:
-        Y_test = np.concatenate(Y_test)
 
-    model = LR().fit(X_train_lags, Y_train)
-    r2 = model.score(X_test_lags, Y_test)
-    return r2
+def fit_linear_decoder(X_train, Y_train, decoding_window=1, offset=0):
+    """
+    Fit the same linear behavioral decoder used by linear_decode_r2.
+    """
+    X_train_lags, Y_train_aligned = prepare_linear_decode_data(
+        X_train,
+        Y_train,
+        decoding_window=decoding_window,
+        offset=offset,
+    )
+
+    return LR().fit(X_train_lags, Y_train_aligned)
+
+
+def score_linear_decoder(
+    model,
+    X_test,
+    Y_test,
+    decoding_window=1,
+    offset=0,
+):
+    """
+    Score an already-fitted behavioral decoder without refitting it.
+    """
+    X_test_lags, Y_test_aligned = prepare_linear_decode_data(
+        X_test,
+        Y_test,
+        decoding_window=decoding_window,
+        offset=offset,
+    )
+
+    return model.score(X_test_lags, Y_test_aligned)
+
+
+def linear_decode_r2(
+    X_train,
+    Y_train,
+    X_test,
+    Y_test,
+    decoding_window=1,
+    offset=0,
+):
+    """
+    Original behavior: fit on X_train/Y_train and score X_test/Y_test.
+    """
+    model = fit_linear_decoder(
+        X_train,
+        Y_train,
+        decoding_window=decoding_window,
+        offset=offset,
+    )
+
+    return score_linear_decoder(
+        model,
+        X_test,
+        Y_test,
+        decoding_window=decoding_window,
+        offset=offset,
+    )
 
 
 def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       n_init=1, verbose=False, Kernel=None, xdim=None, beta=1e-3, beta1=1, beta2=0, good_ts=None,
                       standardize_Y=False, train_test_ratio=0.8, regularization_weight=0,
                       predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent",
-                      hidden_dim=256, n_layers=1):
+                      hidden_dim=256, n_layers=1, neuron_dropout_p=0.0, neuron_dropout_seed=0, eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -129,6 +159,32 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
 
     results_runtime = np.zeros((len(dim_vals), len(T_pi_vals)))
     results_peak_memory = np.zeros((len(dim_vals), len(T_pi_vals)))
+
+    results_masked_r2 = np.full(
+        (
+            len(dim_vals),
+            len(eval_missing_ps),
+            eval_mask_reps,
+            len(offset_vals),
+            len(T_pi_vals),
+        ),
+        np.nan,
+        dtype=float,
+    )
+
+    # Same shape as results_masked_r2, but the behavioral decoder
+    # is fitted ONCE on full-neuron training latents and then frozen.
+    results_frozen_masked_r2 = np.full(
+        (
+            len(dim_vals),
+            len(eval_missing_ps),
+            eval_mask_reps,
+            len(offset_vals),
+            len(T_pi_vals),
+        ),
+        np.nan,
+        dtype=float,
+    )
 
 
     min_std = 1e-6
@@ -250,6 +306,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 lr=lr,
                 early_stop=num_early_stop,
                 verbose=verbose,
+                neuron_dropout_p=neuron_dropout_p,
+                neuron_dropout_seed=neuron_dropout_seed,
             )
 
             if str(device).startswith("cuda"):
@@ -283,13 +341,187 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
             ### save encoded test data
 
 
+            # Standard evaluation: fit and test using the complete-neuron data.
             for offset_idx in range(len(offset_vals)):
                 offset = offset_vals[offset_idx]
-                r2_cpic = linear_decode_r2(X_train_cpic, Y_train, X_test_cpic, Y_test, decoding_window=decoding_window, offset=offset)
-                # r2_dca = linear_decode_r2(X_train_dca, Y_train, X_test_dca, Y_test, decoding_window=decoding_window, offset=offset)
+                r2_cpic = linear_decode_r2(
+                    X_train_cpic,
+                    Y_train,
+                    X_test_cpic,
+                    Y_test,
+                    decoding_window=decoding_window,
+                    offset=offset,
+                )
                 results_r2[dim_idx, offset_idx, T_pi_idx] = r2_cpic
+
+            # Frozen-decoder experiment:
+            # fit ONCE using complete-neuron training representations.
+            frozen_decoders = {}
+
+            for offset_idx in range(len(offset_vals)):
+                offset = offset_vals[offset_idx]
+
+                frozen_decoders[offset_idx] = fit_linear_decoder(
+                    X_train_cpic,
+                    Y_train,
+                    decoding_window=decoding_window,
+                    offset=offset,
+                )
+
+            # --------------------------------------------------------
+            # Fixed pseudo-session neuron-missingness evaluation.
+            #
+            # For each condition we select an EXACT number of missing
+            # neurons and keep that same subset absent throughout both
+            # the train and test recordings.
+            #
+            # The behavioral decoder is then fit on masked-train
+            # latents and evaluated on masked-test latents.
+            # --------------------------------------------------------
+            for missing_idx, missing_p in enumerate(eval_missing_ps):
+                if not 0.0 <= missing_p < 1.0:
+                    raise ValueError(
+                        f"eval missingness must satisfy 0 <= p < 1; got {missing_p}"
+                    )
+
+                n_missing = int(round(float(missing_p) * xdim))
+
+                for mask_rep in range(eval_mask_reps):
+                    # Seed depends ONLY on evaluation settings, not
+                    # model/dropout RNG. This guarantees identical
+                    # evaluation masks for ordinary and mask-trained CPIC.
+                    seed_sequence = np.random.SeedSequence(
+                        [
+                            int(eval_mask_seed),
+                            int(round(float(missing_p) * 10000)),
+                            int(mask_rep),
+                        ]
+                    )
+                    eval_rng = np.random.default_rng(seed_sequence)
+
+                    neuron_mask = np.ones(xdim, dtype=np.float32)
+
+                    if n_missing > 0:
+                        dropped_neurons = np.sort(
+                            eval_rng.choice(
+                                xdim,
+                                size=n_missing,
+                                replace=False,
+                            )
+                        )
+                        neuron_mask[dropped_neurons] = 0.0
+                    else:
+                        dropped_neurons = np.array([], dtype=int)
+
+                    # Same missing neurons across the ENTIRE pseudo-session.
+                    X_train_eval = [
+                        Xi * neuron_mask for Xi in X_train_ctd
+                    ]
+                    X_test_eval = X_test_ctd * neuron_mask
+
+                    with torch.no_grad():
+                        X_train_eval_cpic = [
+                            CPIC_model.encode(
+                                torch.from_numpy(Xi)
+                                .to(torch.float)
+                                .to(device)
+                            ).cpu().numpy()
+                            for Xi in X_train_eval
+                        ]
+
+                        X_test_eval_cpic = CPIC_model.encode(
+                            torch.from_numpy(X_test_eval)
+                            .to(torch.float)
+                            .to(device)
+                        ).cpu().numpy()
+
+                    rep_r2 = []
+                    frozen_rep_r2 = []
+
+                    for offset_idx in range(len(offset_vals)):
+                        offset = offset_vals[offset_idx]
+
+                        # ------------------------------------------------
+                        # Existing within-pseudo-session evaluation:
+                        # refit the behavioral probe after neurons vanish.
+                        # ------------------------------------------------
+                        r2_masked = linear_decode_r2(
+                            X_train_eval_cpic,
+                            Y_train,
+                            X_test_eval_cpic,
+                            Y_test,
+                            decoding_window=decoding_window,
+                            offset=offset,
+                        )
+
+                        results_masked_r2[
+                            dim_idx,
+                            missing_idx,
+                            mask_rep,
+                            offset_idx,
+                            T_pi_idx,
+                        ] = r2_masked
+
+                        rep_r2.append(float(r2_masked))
+
+                        # ------------------------------------------------
+                        # NEW: frozen clean -> masked transfer.
+                        #
+                        # This decoder was trained only on COMPLETE-neuron
+                        # training latents. It never sees masked training
+                        # representations and is not refit here.
+                        # ------------------------------------------------
+                        frozen_r2 = score_linear_decoder(
+                            frozen_decoders[offset_idx],
+                            X_test_eval_cpic,
+                            Y_test,
+                            decoding_window=decoding_window,
+                            offset=offset,
+                        )
+
+                        results_frozen_masked_r2[
+                            dim_idx,
+                            missing_idx,
+                            mask_rep,
+                            offset_idx,
+                            T_pi_idx,
+                        ] = frozen_r2
+
+                        frozen_rep_r2.append(float(frozen_r2))
+
+                    print(
+                        f"Mask eval | missing={missing_p:.2f} "
+                        f"| rep={mask_rep} "
+                        f"| dropped={n_missing}/{xdim} "
+                        f"| refit_mean_R2={np.mean(rep_r2):.6f} "
+                        f"| frozen_mean_R2={np.mean(frozen_rep_r2):.6f}"
+                    )
+
+                    print(
+                        "  refit R2:",
+                        np.round(rep_r2, 6).tolist()
+                    )
+
+                    print(
+                        "  frozen R2:",
+                        np.round(frozen_rep_r2, 6).tolist()
+                    )
+
+                    if n_missing > 0:
+                        print(
+                            "  dropped neuron indices:",
+                            dropped_neurons.tolist()
+                        )
+
         print("dim_idx: {}, R2: {}".format(dim_vals[dim_idx], results_r2[dim_idx]))
-    return results_r2, results_MI, results_runtime, results_peak_memory
+    return (
+        results_r2,
+        results_MI,
+        results_runtime,
+        results_peak_memory,
+        results_masked_r2,
+        results_frozen_masked_r2,
+    )
 
 
 if __name__ == "__main__":
@@ -300,7 +532,52 @@ if __name__ == "__main__":
     parser.add_argument("--hidden-dim", type=int, default=None)
     parser.add_argument("--n-layers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducible experiments")
+    parser.add_argument(
+        "--neuron-dropout-p",
+        type=float,
+        default=0.0,
+        help="Probability of dropping each neuron during CPIC training",
+    )
+    parser.add_argument(
+        "--train-mask-seed",
+        type=int,
+        default=10000,
+        help="Independent RNG seed for training neuron dropout",
+    )
+    parser.add_argument(
+        "--eval-missing-ps",
+        type=str,
+        default="0,0.1,0.25,0.5",
+        help="Comma-separated fixed test missing-neuron fractions",
+    )
+    parser.add_argument(
+        "--eval-mask-reps",
+        type=int,
+        default=3,
+        help="Number of fixed neuron-subset replicates per missingness level",
+    )
+    parser.add_argument(
+        "--eval-mask-seed",
+        type=int,
+        default=4242,
+        help="Seed defining fixed pseudo-session evaluation masks",
+    )
     args = parser.parse_args()
+
+    eval_missing_ps = tuple(
+        float(x.strip())
+        for x in args.eval_missing_ps.split(",")
+        if x.strip()
+    )
+
+    if len(eval_missing_ps) == 0:
+        raise ValueError("--eval-missing-ps must contain at least one value")
+
+    if any((p < 0.0 or p >= 1.0) for p in eval_missing_ps):
+        raise ValueError(
+            f"All evaluation missingness values must satisfy 0 <= p < 1; "
+            f"got {eval_missing_ps}"
+        )
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -524,18 +801,47 @@ if __name__ == "__main__":
 
     for ydim in ydims:
         regularzation_weight = 0
-        result_r2, result_MI, result_runtime, result_peak_memory = run_analysis_cpic(X, Y, T_pi_vals, dim_vals=[ydim], offset_vals=offsets, decoding_window=win,
+        (
+            result_r2,
+            result_MI,
+            result_runtime,
+            result_peak_memory,
+            result_masked_r2,
+            result_frozen_masked_r2,
+        ) = run_analysis_cpic(X, Y, T_pi_vals, dim_vals=[ydim], offset_vals=offsets, decoding_window=win,
                           n_init=n_init, verbose=True, Kernel=Kernel, xdim=xdim, beta=beta, beta1=beta1, beta2=beta2,
                           good_ts=good_ts, standardize_Y=standardize_Y, regularization_weight=regularzation_weight,
                           predictive_loss=predictive_loss, reconstruction_targets=reconstruction_targets,
-                          predictive_space=predictive_space, hidden_dim=hidden_dim, n_layers=n_layers)
+                          predictive_space=predictive_space, hidden_dim=hidden_dim, n_layers=n_layers,
+                          neuron_dropout_p=args.neuron_dropout_p,
+                          neuron_dropout_seed=args.train_mask_seed,
+                          eval_missing_ps=eval_missing_ps,
+                          eval_mask_reps=args.eval_mask_reps,
+                          eval_mask_seed=args.eval_mask_seed)
 
         result = {
             "ydim": int(ydim),
             "seed": int(args.seed),
 
             "r2": result_r2,
+
+            # Behavioral decoder refit separately for each
+            # pseudo-session neuron population.
+            "mask_eval_r2": result_masked_r2,
+
+            # Behavioral decoder trained once using full-neuron
+            # representations and frozen across test masks.
+            "frozen_mask_eval_r2": result_frozen_masked_r2,
+
             "mi": result_MI,
+
+            "masking": {
+                "train_neuron_dropout_p": float(args.neuron_dropout_p),
+                "train_mask_seed": int(args.train_mask_seed),
+                "eval_missing_ps": [float(p) for p in eval_missing_ps],
+                "eval_mask_reps": int(args.eval_mask_reps),
+                "eval_mask_seed": int(args.eval_mask_seed),
+            },
 
             "train_runtime_seconds": result_runtime,
             "peak_gpu_memory_mb": result_peak_memory,
@@ -555,7 +861,7 @@ if __name__ == "__main__":
 
         output_file = os.path.join(
             saved_root,
-            f"result_ydim{ydim}_seed{args.seed}.pkl"
+            f"result_ydim{ydim}_seed{args.seed}_traindrop{int(round(args.neuron_dropout_p * 100)):03d}.pkl"
         )
 
         with open(output_file, "wb") as f:
