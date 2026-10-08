@@ -582,6 +582,12 @@ if __name__ == "__main__":
         help="Override the configured encoder architecture",
     )
     parser.add_argument(
+        "--beta",
+        type=float,
+        default=None,
+        help="Override the CPIC compression weight",
+    )
+    parser.add_argument(
         "--neuron-dropout-p",
         type=float,
         default=0.0,
@@ -734,7 +740,11 @@ if __name__ == "__main__":
         os.makedirs(saved_root, exist_ok=True)
 
     # set hyper-parameters
-    beta = cfg.getfloat('Hyperparameters', 'beta')
+    beta = (
+        args.beta
+        if args.beta is not None
+        else cfg.getfloat('Hyperparameters', 'beta')
+    )
     beta1 = cfg.getfloat('Hyperparameters', 'beta1')
     beta2 = cfg.getfloat('Hyperparameters', 'beta2')
     beta_warmup_epochs = cfg.getint('Hyperparameters', 'beta_warmup_epochs', fallback=0)
@@ -925,7 +935,10 @@ if __name__ == "__main__":
             },
         }
 
-        run_tag = f"{kernel.lower()}_avail{int(args.availability_mask)}"
+        run_tag = (
+            f"{kernel.lower()}_avail{int(args.availability_mask)}"
+            f"_beta{beta:g}"
+        )
 
         output_file = os.path.join(
             saved_root,
