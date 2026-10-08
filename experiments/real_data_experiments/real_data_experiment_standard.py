@@ -576,6 +576,12 @@ if __name__ == "__main__":
     parser.add_argument("--n-layers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducible experiments")
     parser.add_argument(
+        "--kernel",
+        choices=["Linear", "MLP"],
+        default=None,
+        help="Override the configured encoder architecture",
+    )
+    parser.add_argument(
         "--neuron-dropout-p",
         type=float,
         default=0.0,
@@ -764,7 +770,11 @@ if __name__ == "__main__":
         estimator_predictive = 'infonce_lower'
         critic = 'concat'
         baseline = 'constant'
-    kernel = cfg.get('Hyperparameters', 'kernel')
+    kernel = (
+        args.kernel
+        if args.kernel is not None
+        else cfg.get('Hyperparameters', 'kernel')
+    )
     mi_params = {'estimator_compress': estimator_compress}
     if cfg.has_option('Hyperparameters', 'predictive_loss'):
         predictive_loss = cfg.get('Hyperparameters', 'predictive_loss')
@@ -915,13 +925,19 @@ if __name__ == "__main__":
             },
         }
 
-        mask_tag = "_availmask" if args.availability_mask else ""
+        run_tag = f"{kernel.lower()}_avail{int(args.availability_mask)}"
 
         output_file = os.path.join(
             saved_root,
-            f"result_ydim{ydim}_seed{args.seed}_traindrop"
-            f"{int(round(args.neuron_dropout_p * 100)):03d}{mask_tag}.pkl"
+            f"result_{run_tag}_ydim{ydim}_seed{args.seed}"
+            f"_traindrop{int(round(args.neuron_dropout_p * 100)):03d}.pkl"
         )
+
+        result["config"].update({
+            "encoder_kernel": kernel,
+            "availability_mask": bool(args.availability_mask),
+            "do_dca_init": bool(do_dca_init),
+        })
 
         with open(output_file, "wb") as f:
             pickle.dump(result, f)
