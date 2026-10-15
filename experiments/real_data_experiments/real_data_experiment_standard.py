@@ -140,7 +140,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       standardize_Y=False, train_test_ratio=0.8, regularization_weight=0,
                       predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent",
                       hidden_dim=256, n_layers=1, neuron_dropout_p=0.0, neuron_dropout_seed=0, 
-                      eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242, availability_mask=False):
+                      eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242, availability_mask=False,
+                      diagnose_mlp=False, diagnostics=None):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -349,7 +350,11 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 neuron_dropout_p=neuron_dropout_p,
                 neuron_dropout_seed=neuron_dropout_seed,
                 availability_mask=availability_mask,
+                diagnose_mlp=diagnose_mlp,
             )
+            if diagnostics is not None:
+                diagnostics.extend({"ydim": int(dim), "T": int(T_pi), **entry}
+                                   for entry in CPIC_model.mlp_diagnostics)
 
             if str(device).startswith("cuda"):
                 torch.cuda.synchronize()
@@ -574,6 +579,10 @@ if __name__ == "__main__":
     parser.add_argument('--ydim', type=int, default=None, help='Override latent dimension')
     parser.add_argument("--hidden-dim", type=int, default=None)
     parser.add_argument("--n-layers", type=int, default=None)
+    parser.add_argument(
+        "--diagnose-mlp", action="store_true",
+        help="Log one training-batch MLP diagnostic at epochs 0, 2, 3, 4, and 8",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducible experiments")
     parser.add_argument(
         "--kernel",
@@ -873,6 +882,19 @@ if __name__ == "__main__":
         raise ValueError("This kernel is not available.")
 
     for ydim in ydims:
+        run_tag = (
+            f"{kernel.lower()}_avail{int(args.availability_mask)}"
+            f"_beta{beta:g}"
+        )
+        output_file = os.path.join(
+            saved_root,
+            f"result_{run_tag}_ydim{ydim}_seed{args.seed}"
+            f"_traindrop{int(round(args.neuron_dropout_p * 100)):03d}"
+            f"{'_diagmlp' if args.diagnose_mlp else ''}.pkl"
+        )
+        if args.diagnose_mlp and os.path.exists(output_file):
+            raise FileExistsError(f"Diagnostic result already exists: {output_file}")
+        diagnostics = [] if args.diagnose_mlp else None
         regularzation_weight = 0
         (
             result_r2,
@@ -891,7 +913,9 @@ if __name__ == "__main__":
                           eval_missing_ps=eval_missing_ps,
                           eval_mask_reps=args.eval_mask_reps,
                           eval_mask_seed=args.eval_mask_seed,
-                          availability_mask=args.availability_mask)
+                          availability_mask=args.availability_mask,
+                          diagnose_mlp=args.diagnose_mlp,
+                          diagnostics=diagnostics)
 
         result = {
             "ydim": int(ydim),
@@ -934,17 +958,8 @@ if __name__ == "__main__":
                 "encoder_xdim": int(xdim * (2 if args.availability_mask else 1)),
             },
         }
-
-        run_tag = (
-            f"{kernel.lower()}_avail{int(args.availability_mask)}"
-            f"_beta{beta:g}"
-        )
-
-        output_file = os.path.join(
-            saved_root,
-            f"result_{run_tag}_ydim{ydim}_seed{args.seed}"
-            f"_traindrop{int(round(args.neuron_dropout_p * 100)):03d}.pkl"
-        )
+        if args.diagnose_mlp:
+            result["mlp_diagnostics"] = diagnostics
 
         result["config"].update({
             "encoder_kernel": kernel,
@@ -952,7 +967,7 @@ if __name__ == "__main__":
             "do_dca_init": bool(do_dca_init),
         })
 
-        with open(output_file, "wb") as f:
+        with open(output_file, "xb" if args.diagnose_mlp else "wb") as f:
             pickle.dump(result, f)
 
         print(f"Saved benchmark result to: {output_file}")

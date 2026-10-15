@@ -1,4 +1,5 @@
 from errno import ECANCELED
+import json
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -591,7 +592,8 @@ class CPIC(nn.Module):
 
 
     def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True,
-            epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0, availability_mask=False):
+            epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0, availability_mask=False,
+            diagnose_mlp=False):
         """
         Fit the CPIC model to the data X.
 
@@ -632,6 +634,17 @@ class CPIC(nn.Module):
             raise ValueError(
                 f"neuron_dropout_p must satisfy 0 <= p < 1; got {neuron_dropout_p}"
             )
+        if diagnose_mlp and (self.encoder_type != "mlp" or self.predictive_loss != "mi"
+                             or self.predictive_space != "latent" or self.deterministic):
+            raise ValueError("diagnose_mlp requires a stochastic MLP with latent-space MI prediction")
+        self.mlp_diagnostics = []
+
+        def grad_norm(grads):
+            squares = [grad.detach().square().sum() for grad in grads if grad is not None]
+            return float(torch.sqrt(torch.stack(squares).sum()).item()) if squares else 0.0
+
+        def parameter_grad_norm(parameters):
+            return grad_norm([param.grad for param in parameters])
 
         neuron_dropout_generator = None
         if neuron_dropout_p > 0.0:
@@ -723,7 +736,7 @@ class CPIC(nn.Module):
             # Rate warm-up: set the live beta for this epoch (no-op when warmup/ramp are 0).
             self.beta = self._beta_at_epoch(epoch)
             loss_by_epoch, I_compress_bound_by_epoch, I_predictive_bound_by_epoch = [], [], []
-            for X_past_batch, X_future_batch in train_loader:
+            for batch_idx, (X_past_batch, X_future_batch) in enumerate(train_loader):
                 X_past_batch = X_past_batch.to(torch.float).to(self.device)
                 X_future_batch = X_future_batch.to(torch.float).to(self.device)
 
@@ -774,13 +787,81 @@ class CPIC(nn.Module):
                             f"encoder_input_dim={X_past_batch.shape[-1]}"
                         )
 
-                loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
+                diagnose_batch = diagnose_mlp and epoch in (0, 2, 3, 4, 8) and batch_idx == 0
+                captured = {}
+                if diagnose_batch:
+                    captured["latents"] = []
+
+                    def capture_encoder(_module, _inputs, output):
+                        # The first two calls encode past and future; the third scores compression.
+                        if len(captured["latents"]) < 2:
+                            captured["latents"].append(tuple(t.detach() for t in output))
+
+                    def capture_critic(_module, _inputs, output):
+                        captured["scores"] = output.detach()
+
+                    encoder_hook = self.encoder.register_forward_hook(capture_encoder)
+                    critic_hook = self.critic.register_forward_hook(capture_critic)
+                try:
+                    loss, I_compress_bound, I_predictive_bound = self(X_past_batch, X_future_batch)
+                finally:
+                    if diagnose_batch:
+                        encoder_hook.remove()
+                        critic_hook.remove()
+
+                if diagnose_batch:
+                    mean_params = tuple(self.encoder._mean.parameters())
+                    logvar_params = tuple(self.encoder._logvars.parameters())
+                    encoder_params = mean_params + logvar_params
+                    compress_grads = torch.autograd.grad(
+                        self.beta * I_compress_bound, encoder_params,
+                        retain_graph=True, allow_unused=True,
+                    )
+                    predictive_grads = torch.autograd.grad(
+                        -self.beta1 * I_predictive_bound, encoder_params,
+                        retain_graph=True, allow_unused=True,
+                    )
+
+                    (past_mean, past_vars), (future_mean, future_vars) = captured["latents"]
+                    scores = captured["scores"]
+                    diagonal = scores.diagonal()
+                    off_diagonal_mean = (scores.sum() - diagonal.sum()) / (scores.numel() - diagonal.numel())
+                    diagnostic = {
+                        "epoch": epoch,
+                        "batch_index": batch_idx,
+                        "optimizer_phase": "critic_only" if do_init and epoch < epochs / 4 else "joint",
+                        "beta": float(self.beta),
+                        "I_compress": float(I_compress_bound.detach().item()),
+                        "I_predictive": float(I_predictive_bound.detach().item()),
+                        "compress_mean_grad_norm": grad_norm(compress_grads[:len(mean_params)]),
+                        "compress_logvar_grad_norm": grad_norm(compress_grads[len(mean_params):]),
+                        "predictive_mean_grad_norm": grad_norm(predictive_grads[:len(mean_params)]),
+                        "predictive_logvar_grad_norm": grad_norm(predictive_grads[len(mean_params):]),
+                        "compress_mean_connected_params": sum(g is not None for g in compress_grads[:len(mean_params)]),
+                        "compress_logvar_connected_params": sum(g is not None for g in compress_grads[len(mean_params):]),
+                        "predictive_mean_connected_params": sum(g is not None for g in predictive_grads[:len(mean_params)]),
+                        "predictive_logvar_connected_params": sum(g is not None for g in predictive_grads[len(mean_params):]),
+                        "past_latent_mean_variance": float(past_mean.reshape(past_mean.shape[0], -1).var(dim=0, unbiased=False).mean().item()),
+                        "future_latent_mean_variance": float(future_mean.reshape(future_mean.shape[0], -1).var(dim=0, unbiased=False).mean().item()),
+                        "past_encoded_variance_median": float(past_vars.median().item()),
+                        "future_encoded_variance_median": float(future_vars.median().item()),
+                        "critic_score_margin": float((diagonal.mean() - off_diagonal_mean).item()),
+                    }
 
                 optimizer.zero_grad()
                 if do_init:
                     optimizer_init.zero_grad()
 
                 loss.backward()
+                if diagnose_batch:
+                    diagnostic["encoder_mean_grad_norm"] = parameter_grad_norm(mean_params)
+                    diagnostic["encoder_logvar_grad_norm"] = parameter_grad_norm(logvar_params)
+                    diagnostic["critic_grad_norm"] = parameter_grad_norm(self.critic.parameters())
+                    diagnostic["encoder_mean_connected_params"] = sum(p.grad is not None for p in mean_params)
+                    diagnostic["encoder_logvar_connected_params"] = sum(p.grad is not None for p in logvar_params)
+                    diagnostic["critic_connected_params"] = sum(p.grad is not None for p in self.critic.parameters())
+                    self.mlp_diagnostics.append(diagnostic)
+                    print("MLP_DIAGNOSTIC " + json.dumps(diagnostic, sort_keys=True), flush=True)
 
                 # Check if gradients are NaN
                 grad_bool = True
