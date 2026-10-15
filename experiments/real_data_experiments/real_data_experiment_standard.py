@@ -7,6 +7,11 @@ import time
 
 import torch
 from cpic.exp_utils import data_util
+from cpic.masking_diagnostics import (
+    AVAILABILITY_FEATURES, build_encoder_input as construct_encoder_input,
+    clean_decoder_stats, latent_pair_stats,
+    paired_first_layer_stats, prediction_pair_stats, result_filename,
+)
 
 import numpy as np
 from sklearn.linear_model import LinearRegression as LR
@@ -141,7 +146,8 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                       predictive_loss="mi", reconstruction_targets=("past",), predictive_space="latent",
                       hidden_dim=256, n_layers=1, neuron_dropout_p=0.0, neuron_dropout_seed=0, 
                       eval_missing_ps=(0.0,), eval_mask_reps=1, eval_mask_seed=4242, availability_mask=False,
-                      diagnose_mlp=False, diagnostics=None):
+                      diagnose_mlp=False, diagnostics=None, availability_features="actual",
+                      ablation_diagnostics=None):
     """
     :param X: N x XDim
     :param Y: N x YDim
@@ -212,19 +218,14 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
     # [neural activity, binary availability mask]
     encoder_xdim = (2 * neural_xdim if availability_mask else neural_xdim)
 
+    if availability_features not in AVAILABILITY_FEATURES:
+        raise ValueError(f"Unknown availability-features mode: {availability_features}")
+    if not availability_mask and availability_features != "actual":
+        raise ValueError("zeros/ones availability features require availability_mask=True")
+
     def build_encoder_input(Xi, neuron_mask):
-        """
-        Zero-fill unavailable neurons and optionally append
-        the binary neuron-availability mask.
-        """
-        X_masked = Xi * neuron_mask
-
-        if not availability_mask:
-            return X_masked
-
-        availability = np.broadcast_to(neuron_mask, Xi.shape,).astype(Xi.dtype, copy=False)
-
-        return np.concatenate([X_masked, availability], axis=-1,)
+        return construct_encoder_input(Xi, neuron_mask, availability_mask,
+                                       availability_features)
 
     if availability_mask:
         print(f"Mask-aware encoder enabled: "
@@ -350,6 +351,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                 neuron_dropout_p=neuron_dropout_p,
                 neuron_dropout_seed=neuron_dropout_seed,
                 availability_mask=availability_mask,
+                availability_features=availability_features,
                 diagnose_mlp=diagnose_mlp,
             )
             if diagnostics is not None:
@@ -408,6 +410,7 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
             # Frozen-decoder experiment:
             # fit ONCE using complete-neuron training representations.
             frozen_decoders = {}
+            frozen_reference = {}
 
             for offset_idx in range(len(offset_vals)):
                 offset = offset_vals[offset_idx]
@@ -418,6 +421,18 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                     decoding_window=decoding_window,
                     offset=offset,
                 )
+                if ablation_diagnostics is not None:
+                    clean_design, _ = prepare_linear_decode_data(
+                        X_train_cpic, Y_train, decoding_window=decoding_window,
+                        offset=offset)
+                    clean_test_design, aligned_targets = prepare_linear_decode_data(
+                        X_test_cpic, Y_test, decoding_window=decoding_window,
+                        offset=offset)
+                    frozen_reference[offset_idx] = {
+                        "decoder": clean_decoder_stats(frozen_decoders[offset_idx], clean_design),
+                        "clean_prediction": frozen_decoders[offset_idx].predict(clean_test_design),
+                        "targets": aligned_targets,
+                    }
 
             # --------------------------------------------------------
             # Fixed pseudo-session neuron-missingness evaluation.
@@ -483,6 +498,20 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                             .to(device)
                         ).cpu().numpy()
 
+                    if ablation_diagnostics is not None:
+                        latent_stats = {
+                            "train": latent_pair_stats(X_train_cpic[0], X_train_eval_cpic[0]),
+                            "test": latent_pair_stats(X_test_cpic, X_test_eval_cpic),
+                        }
+                        first_layer = None
+                        if availability_mask and CPIC_model.encoder.encoder_type == "mlp":
+                            # Same time points and saved model; cap work to a fixed prefix.
+                            n_probe = min(1024, len(X_test_encoder))
+                            first_layer = paired_first_layer_stats(
+                                torch.from_numpy(X_test_encoder[:n_probe]).float().to(device),
+                                torch.from_numpy(X_test_eval[:n_probe]).float().to(device),
+                                CPIC_model.encoder._mean[0], neural_xdim)
+
                     rep_r2 = []
                     frozen_rep_r2 = []
 
@@ -526,6 +555,29 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
                             decoding_window=decoding_window,
                             offset=offset,
                         )
+                        if ablation_diagnostics is not None:
+                            masked_design, diagnostic_targets = prepare_linear_decode_data(
+                                X_test_eval_cpic, Y_test,
+                                decoding_window=decoding_window, offset=offset)
+                            reference = frozen_reference[offset_idx]
+                            if not np.array_equal(diagnostic_targets, reference["targets"]):
+                                raise AssertionError("Clean and masked targets are not aligned")
+                            prediction_stats = prediction_pair_stats(
+                                reference["clean_prediction"],
+                                frozen_decoders[offset_idx].predict(masked_design),
+                                diagnostic_targets)
+                            ablation_diagnostics.append({
+                                "ydim": int(dim), "T": int(T_pi), "offset": int(offset),
+                                "missing_p": float(missing_p), "mask_rep": int(mask_rep),
+                                "dropped_neurons": dropped_neurons.tolist(),
+                                "latent_means": latent_stats,
+                                "first_layer": first_layer,
+                                "clean_decoder": reference["decoder"],
+                                "predictions": prediction_stats,
+                                "reported_frozen_r2": float(frozen_r2),
+                                "reconstructed_frozen_r2": float(
+                                    prediction_stats["masked_r2_per_output"].mean()),
+                            })
 
                         results_frozen_masked_r2[
                             dim_idx,
@@ -585,6 +637,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducible experiments")
     parser.add_argument(
+        "--fixed-epochs", action="store_true",
+        help="Complete the configured number of epochs without early stopping",
+    )
+    parser.add_argument(
         "--kernel",
         choices=["Linear", "MLP"],
         default=None,
@@ -635,8 +691,18 @@ if __name__ == "__main__":
             "Missing neural values remain zero-filled."
         ),
     )
+    parser.add_argument(
+        "--availability-features", choices=AVAILABILITY_FEATURES, default="actual",
+        help="Appended 109 features: actual mask bits (default), zeros, or ones; requires --availability-mask for zeros/ones",
+    )
+    parser.add_argument(
+        "--diagnose-ablation", action="store_true",
+        help="Save read-only clean/masked latent, first-layer, and frozen-decoder summaries",
+    )
 
     args = parser.parse_args()
+    if not args.availability_mask and args.availability_features != "actual":
+        parser.error("--availability-features zeros/ones requires --availability-mask")
 
     eval_missing_ps = tuple(
         float(x.strip())
@@ -821,6 +887,8 @@ if __name__ == "__main__":
     batch_size = cfg.getint('Training', 'batch_size')
     num_epochs = cfg.getint('Training', 'num_epochs')
     num_early_stop = cfg.getint('Training', 'num_early_stop')
+    if args.fixed_epochs:
+        num_early_stop = num_epochs + 1
     num_vis = cfg.getint('Training', 'num_vis')
     do_dca_init = cfg.getboolean('Training', 'do_dca_init')
 
@@ -882,19 +950,14 @@ if __name__ == "__main__":
         raise ValueError("This kernel is not available.")
 
     for ydim in ydims:
-        run_tag = (
-            f"{kernel.lower()}_avail{int(args.availability_mask)}"
-            f"_beta{beta:g}"
-        )
-        output_file = os.path.join(
-            saved_root,
-            f"result_{run_tag}_ydim{ydim}_seed{args.seed}"
-            f"_traindrop{int(round(args.neuron_dropout_p * 100)):03d}"
-            f"{'_diagmlp' if args.diagnose_mlp else ''}.pkl"
-        )
-        if args.diagnose_mlp and os.path.exists(output_file):
-            raise FileExistsError(f"Diagnostic result already exists: {output_file}")
+        output_file = result_filename(
+            saved_root, kernel, args.availability_mask, args.availability_features,
+            beta, ydim, args.seed, args.neuron_dropout_p, args.diagnose_mlp,
+            args.diagnose_ablation, args.fixed_epochs)
+        if os.path.exists(output_file):
+            raise FileExistsError(f"Result already exists: {output_file}")
         diagnostics = [] if args.diagnose_mlp else None
+        ablation_diagnostics = [] if args.diagnose_ablation else None
         regularzation_weight = 0
         (
             result_r2,
@@ -914,8 +977,10 @@ if __name__ == "__main__":
                           eval_mask_reps=args.eval_mask_reps,
                           eval_mask_seed=args.eval_mask_seed,
                           availability_mask=args.availability_mask,
+                          availability_features=args.availability_features,
                           diagnose_mlp=args.diagnose_mlp,
-                          diagnostics=diagnostics)
+                          diagnostics=diagnostics,
+                          ablation_diagnostics=ablation_diagnostics)
 
         result = {
             "ydim": int(ydim),
@@ -940,6 +1005,7 @@ if __name__ == "__main__":
                 "eval_mask_reps": int(args.eval_mask_reps),
                 "eval_mask_seed": int(args.eval_mask_seed),
                 "availability_mask": bool(args.availability_mask),
+                "availability_features": args.availability_features,
             },
 
             "train_runtime_seconds": result_runtime,
@@ -954,12 +1020,17 @@ if __name__ == "__main__":
                 "beta": float(beta),
                 "batch_size": int(batch_size),
                 "num_epochs": int(num_epochs),
+                "num_early_stop": int(num_early_stop),
+                "fixed_epochs": bool(args.fixed_epochs),
                 "lr": float(lr),
                 "encoder_xdim": int(xdim * (2 if args.availability_mask else 1)),
+                "availability_features": args.availability_features,
             },
         }
         if args.diagnose_mlp:
             result["mlp_diagnostics"] = diagnostics
+        if args.diagnose_ablation:
+            result["ablation_diagnostics"] = ablation_diagnostics
 
         result["config"].update({
             "encoder_kernel": kernel,
@@ -967,7 +1038,7 @@ if __name__ == "__main__":
             "do_dca_init": bool(do_dca_init),
         })
 
-        with open(output_file, "xb" if args.diagnose_mlp else "wb") as f:
+        with open(output_file, "xb") as f:
             pickle.dump(result, f)
 
         print(f"Saved benchmark result to: {output_file}")

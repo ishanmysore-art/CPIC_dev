@@ -7,6 +7,7 @@ import numpy as np
 import tqdm
 from .models import StructuredEncoder, StructuredDecoder, CRITICS, BASELINES
 from .mi import estimate_mutual_information
+from .masking_diagnostics import AVAILABILITY_FEATURES, append_features_torch, first_layer_stats
 from .utils.helpers import resolve_device, visualize_conv_kernels
 
 
@@ -593,7 +594,7 @@ class CPIC(nn.Module):
 
     def fit(self, X, init_weights=None, epochs=100, batch_size=64, lr=1e-4, early_stop=10, writer=None, compute_encoded_mean_stats=True, verbose=True,
             epoch_callback=None, mask_logit_lr=None, check_grad_finite=False, neuron_dropout_p=0.0, neuron_dropout_seed=0, availability_mask=False,
-            diagnose_mlp=False):
+            diagnose_mlp=False, availability_features="actual"):
         """
         Fit the CPIC model to the data X.
 
@@ -634,6 +635,10 @@ class CPIC(nn.Module):
             raise ValueError(
                 f"neuron_dropout_p must satisfy 0 <= p < 1; got {neuron_dropout_p}"
             )
+        if availability_features not in AVAILABILITY_FEATURES:
+            raise ValueError(f"Unknown availability-features mode: {availability_features}")
+        if not availability_mask and availability_features != "actual":
+            raise ValueError("zeros/ones availability features require availability_mask=True")
         if diagnose_mlp and (self.encoder_type != "mlp" or self.predictive_loss != "mi"
                              or self.predictive_space != "latent" or self.deterministic):
             raise ValueError("diagnose_mlp requires a stochastic MLP with latent-space MI prediction")
@@ -767,23 +772,17 @@ class CPIC(nn.Module):
                     n_kept = int(neuron_mask.sum().item())
 
                     if availability_mask:
-                        past_availability = neuron_mask.expand_as(X_past_batch)
-                        future_availability = neuron_mask.expand_as(X_future_batch)
-
-                        X_past_batch = torch.cat(
-                            [X_past_batch, past_availability],
-                            dim=-1,
-                        )
-                        X_future_batch = torch.cat(
-                            [X_future_batch, future_availability],
-                            dim=-1,
-                        )
+                        X_past_batch = append_features_torch(
+                            X_past_batch, neuron_mask, availability_features)
+                        X_future_batch = append_features_torch(
+                            X_future_batch, neuron_mask, availability_features)
 
                     if epoch == 0 and len(loss_by_epoch) == 0:
                         print(
                             f"Neuron dropout p={neuron_dropout_p:.2f}: "
                             f"first batch keeps {n_kept}/{n_neurons} neurons | "
                             f"availability_mask={availability_mask} | "
+                            f"availability_features={availability_features if availability_mask else 'none'} | "
                             f"encoder_input_dim={X_past_batch.shape[-1]}"
                         )
 
@@ -831,6 +830,8 @@ class CPIC(nn.Module):
                         "batch_index": batch_idx,
                         "optimizer_phase": "critic_only" if do_init and epoch < epochs / 4 else "joint",
                         "beta": float(self.beta),
+                        "availability_features": availability_features if availability_mask else None,
+                        "n_kept_neurons": n_kept if (neuron_dropout_p > 0.0 or availability_mask) else X_past_batch.shape[-1],
                         "I_compress": float(I_compress_bound.detach().item()),
                         "I_predictive": float(I_predictive_bound.detach().item()),
                         "compress_mean_grad_norm": grad_norm(compress_grads[:len(mean_params)]),
@@ -847,6 +848,13 @@ class CPIC(nn.Module):
                         "future_encoded_variance_median": float(future_vars.median().item()),
                         "critic_score_margin": float((diagonal.mean() - off_diagonal_mean).item()),
                     }
+                    if availability_mask:
+                        diagnostic["first_layer"] = first_layer_stats(
+                            X_past_batch, self.encoder._mean[0], n_neurons)
+                        diagnostic["dropped_neurons"] = torch.where(
+                            neuron_mask.reshape(-1) == 0)[0].cpu().tolist()
+                        diagnostic["shared_neuron_mask_across_batch_and_time"] = bool(
+                            torch.all(neuron_mask == neuron_mask[:, :1, :]))
 
                 optimizer.zero_grad()
                 if do_init:
