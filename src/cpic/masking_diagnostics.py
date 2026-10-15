@@ -5,7 +5,7 @@ import os
 import torch
 
 
-AVAILABILITY_FEATURES = ("actual", "zeros", "ones")
+AVAILABILITY_FEATURES = ("actual", "zeros", "ones", "centered")
 
 
 def result_filename(saved_root, kernel, availability_mask, availability_features,
@@ -15,7 +15,7 @@ def result_filename(saved_root, kernel, availability_mask, availability_features
     if availability_features not in AVAILABILITY_FEATURES:
         raise ValueError(f"Unknown availability-features mode: {availability_features}")
     if not availability_mask and availability_features != "actual":
-        raise ValueError("zeros/ones availability features require --availability-mask")
+        raise ValueError("Non-actual availability features require --availability-mask")
     feature_tag = f"_availfeat{availability_features}" if availability_mask else ""
     run_tag = f"{kernel.lower()}_avail{int(availability_mask)}{feature_tag}_beta{beta:g}"
     return os.path.join(
@@ -32,8 +32,11 @@ def append_features_torch(masked_activity, neuron_mask, mode):
     """Append features without changing the mask used on neural activity."""
     if mode not in AVAILABILITY_FEATURES:
         raise ValueError(f"Unknown availability-features mode: {mode}")
-    features = neuron_mask if mode == "actual" else torch.full_like(
-        neuron_mask, 0.0 if mode == "zeros" else 1.0)
+    if mode == "centered":
+        features = 2 * (neuron_mask - 0.75)
+    else:
+        features = neuron_mask if mode == "actual" else torch.full_like(
+            neuron_mask, 0.0 if mode == "zeros" else 1.0)
     return torch.cat((masked_activity, features.expand_as(masked_activity)), dim=-1)
 
 
@@ -45,8 +48,11 @@ def build_encoder_input(activity, neuron_mask, availability_mask=False,
         return masked
     if availability_features not in AVAILABILITY_FEATURES:
         raise ValueError(f"Unknown availability-features mode: {availability_features}")
-    features = neuron_mask if availability_features == "actual" else np.full_like(
-        neuron_mask, 0.0 if availability_features == "zeros" else 1.0)
+    if availability_features == "centered":
+        features = 2 * (neuron_mask - 0.75)
+    else:
+        features = neuron_mask if availability_features == "actual" else np.full_like(
+            neuron_mask, 0.0 if availability_features == "zeros" else 1.0)
     return np.concatenate((masked, np.broadcast_to(features, activity.shape).astype(
         activity.dtype, copy=False)), axis=-1)
 

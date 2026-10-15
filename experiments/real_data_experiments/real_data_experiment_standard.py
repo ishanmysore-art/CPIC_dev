@@ -215,13 +215,13 @@ def run_analysis_cpic(X, Y, T_pi_vals, dim_vals, offset_vals, decoding_window,
         raise ValueError("availability_mask is currently supported only with Kernel=None")
 
     # Mask-aware CPIC receives:
-    # [neural activity, binary availability mask]
+    # [neural activity, availability features]
     encoder_xdim = (2 * neural_xdim if availability_mask else neural_xdim)
 
     if availability_features not in AVAILABILITY_FEATURES:
         raise ValueError(f"Unknown availability-features mode: {availability_features}")
     if not availability_mask and availability_features != "actual":
-        raise ValueError("zeros/ones availability features require availability_mask=True")
+        raise ValueError("Non-actual availability features require availability_mask=True")
 
     def build_encoder_input(Xi, neuron_mask):
         return construct_encoder_input(Xi, neuron_mask, availability_mask,
@@ -687,13 +687,13 @@ if __name__ == "__main__":
         "--availability-mask",
         action="store_true",
         help=(
-            "Append a binary neuron-availability mask to CPIC input. "
+            "Append neuron-availability features to CPIC input. "
             "Missing neural values remain zero-filled."
         ),
     )
     parser.add_argument(
         "--availability-features", choices=AVAILABILITY_FEATURES, default="actual",
-        help="Appended 109 features: actual mask bits (default), zeros, or ones; requires --availability-mask for zeros/ones",
+        help="Appended features: actual mask bits (default), zeros, ones, or 2*(mask-0.75); non-actual modes require --availability-mask",
     )
     parser.add_argument(
         "--diagnose-ablation", action="store_true",
@@ -702,7 +702,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if not args.availability_mask and args.availability_features != "actual":
-        parser.error("--availability-features zeros/ones requires --availability-mask")
+        parser.error("Non-actual --availability-features modes require --availability-mask")
 
     eval_missing_ps = tuple(
         float(x.strip())

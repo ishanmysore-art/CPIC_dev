@@ -28,7 +28,8 @@ class MaskAblationTests(unittest.TestCase):
         mask = torch.tensor([[[1., 0., 1.]]])
         for mode, expected in (("actual", [1., 0., 1.]),
                                ("zeros", [0., 0., 0.]),
-                               ("ones", [1., 1., 1.])):
+                               ("ones", [1., 1., 1.]),
+                               ("centered", [0.5, -1.5, 0.5])):
             with self.subTest(mode=mode):
                 past_input = append_features_torch(activity * mask, mask, mode)
                 future_input = append_features_torch(future * mask, mask, mode)
@@ -38,9 +39,19 @@ class MaskAblationTests(unittest.TestCase):
                 self.assertTrue(torch.equal(future_input[..., :3], future * mask))
                 self.assertTrue(torch.equal(past_input[..., 3:], future_input[..., 3:]))
                 np.testing.assert_array_equal(past_input[0, 0, 3:].numpy(), expected)
-                if mode != "actual":
-                    clean = build_encoder_input(activity.numpy(), np.ones(3), True, mode)
+                clean = build_encoder_input(activity.numpy(), np.ones(3), True, mode)
+                if mode in ("zeros", "ones"):
                     np.testing.assert_array_equal(np_input[..., 3:], clean[..., 3:])
+                if mode == "centered":
+                    self.assertTrue(np.all(clean[..., 3:] == 0.5))
+                    np.testing.assert_array_equal(np_input[..., 3:] / 2 + 0.75,
+                                                  np.broadcast_to(mask.numpy(), activity.shape))
+
+    def test_centered_features_have_expected_training_moments(self):
+        present, missing = 2 * (1 - 0.75), 2 * (0 - 0.75)
+        self.assertEqual(0.75 * present + 0.25 * missing, 0)
+        self.assertEqual(0.75 * present ** 2 + 0.25 * missing ** 2, 0.75)
+        self.assertEqual(0.75 * 1 ** 2 + 0.25 * 0 ** 2, 0.75)
 
     def test_fit_preserves_neural_dropout_across_modes(self):
         from cpic.CPIC import CPIC
@@ -48,7 +59,7 @@ class MaskAblationTests(unittest.TestCase):
         dataset = TensorDataset(past, past + 0.25)
         observed = {}
         rng_states = {}
-        for mode in ("actual", "zeros", "ones"):
+        for mode in ("actual", "zeros", "ones", "centered"):
             torch.manual_seed(71)
             model = CPIC(ydim=2, T=2, xdim=6, hidden_dim=8, beta=1e-4,
                          device="cpu", encoder_params={"encoder_type": "mlp", "n_layers": 0})
@@ -65,11 +76,15 @@ class MaskAblationTests(unittest.TestCase):
                       availability_mask=True, availability_features=mode)
             observed[mode] = seen[0]
             rng_states[mode] = torch.get_rng_state().clone()
-        for mode in ("zeros", "ones"):
+        for mode in ("zeros", "ones", "centered"):
             self.assertTrue(torch.equal(rng_states[mode], rng_states["actual"]))
             self.assertTrue(torch.equal(observed[mode][0][..., :3], observed["actual"][0][..., :3]))
             self.assertTrue(torch.equal(observed[mode][1][..., :3], observed["actual"][1][..., :3]))
-            self.assertTrue(torch.all(observed[mode][0][..., 3:] == (0 if mode == "zeros" else 1)))
+            if mode == "centered":
+                self.assertTrue(torch.equal(observed[mode][0][..., 3:] / 2 + 0.75,
+                                            observed["actual"][0][..., 3:]))
+            else:
+                self.assertTrue(torch.all(observed[mode][0][..., 3:] == (0 if mode == "zeros" else 1)))
 
     def test_first_layer_decomposition_and_gate_changes(self):
         layer = torch.nn.Linear(4, 2)
@@ -95,26 +110,28 @@ class MaskAblationTests(unittest.TestCase):
         from cpic.CPIC import CPIC
         past = torch.arange(48, dtype=torch.float32).reshape(8, 2, 3) / 10
         dataset = TensorDataset(past, past + 0.25)
-        runs = []
-        for enabled in (False, True):
-            torch.manual_seed(81)
-            model = CPIC(ydim=2, T=2, xdim=6, hidden_dim=8, beta=1e-4,
-                         device="cpu", encoder_params={"encoder_type": "mlp", "n_layers": 0})
-            model.fit(dataset, epochs=4, batch_size=8, lr=1e-3, early_stop=20,
-                      verbose=False, neuron_dropout_p=0.25, neuron_dropout_seed=19,
-                      availability_mask=True, availability_features="ones",
-                      diagnose_mlp=enabled)
-            runs.append((model, {k: v.detach().clone() for k, v in model.state_dict().items()},
-                         torch.get_rng_state().clone()))
-        self.assertTrue(torch.equal(runs[0][2], runs[1][2]))
-        for key in runs[0][1]:
-            self.assertTrue(torch.equal(runs[0][1][key], runs[1][1][key]), key)
-        rows = runs[1][0].mlp_diagnostics
-        self.assertEqual([row["epoch"] for row in rows], [0, 2, 3])
-        for row in rows:
-            self.assertEqual(row["availability_features"], "ones")
-            self.assertTrue(row["shared_neuron_mask_across_batch_and_time"])
-            self.assertIn("neural_contribution_rms", row["first_layer"])
+        for mode in ("ones", "centered"):
+            with self.subTest(mode=mode):
+                runs = []
+                for enabled in (False, True):
+                    torch.manual_seed(81)
+                    model = CPIC(ydim=2, T=2, xdim=6, hidden_dim=8, beta=1e-4,
+                                 device="cpu", encoder_params={"encoder_type": "mlp", "n_layers": 0})
+                    model.fit(dataset, epochs=4, batch_size=8, lr=1e-3, early_stop=20,
+                              verbose=False, neuron_dropout_p=0.25, neuron_dropout_seed=19,
+                              availability_mask=True, availability_features=mode,
+                              diagnose_mlp=enabled)
+                    runs.append((model, {k: v.detach().clone() for k, v in model.state_dict().items()},
+                                 torch.get_rng_state().clone()))
+                self.assertTrue(torch.equal(runs[0][2], runs[1][2]))
+                for key in runs[0][1]:
+                    self.assertTrue(torch.equal(runs[0][1][key], runs[1][1][key]), key)
+                rows = runs[1][0].mlp_diagnostics
+                self.assertEqual([row["epoch"] for row in rows], [0, 2, 3])
+                for row in rows:
+                    self.assertEqual(row["availability_features"], mode)
+                    self.assertTrue(row["shared_neuron_mask_across_batch_and_time"])
+                    self.assertIn("neural_contribution_rms", row["first_layer"])
 
     def test_decoder_diagnostics_are_read_only_and_match_score(self):
         rng = np.random.default_rng(4)
@@ -161,15 +178,17 @@ class MaskAblationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = [helpers.result_filename(tmp, "MLP", True, mode, 1e-4,
                                              32, 0, 0.25, True, True, True)
-                     for mode in ("actual", "zeros", "ones")]
-            self.assertEqual(len(set(paths)), 3)
+                     for mode in ("actual", "zeros", "ones", "centered")]
+            self.assertEqual(len(set(paths)), 4)
+            self.assertIn("_availfeatcentered_", paths[-1])
             for path in paths:
                 with open(path, "xb") as output:
                     output.write(b"test")
                 with self.assertRaises(FileExistsError):
                     open(path, "xb")
-            with self.assertRaises(ValueError):
-                helpers.result_filename(tmp, "MLP", False, "zeros", 1e-4, 32, 0, 0.25)
+            for mode in ("zeros", "centered"):
+                with self.assertRaises(ValueError):
+                    helpers.result_filename(tmp, "MLP", False, mode, 1e-4, 32, 0, 0.25)
 
 
 if __name__ == "__main__":

@@ -638,7 +638,7 @@ class CPIC(nn.Module):
         if availability_features not in AVAILABILITY_FEATURES:
             raise ValueError(f"Unknown availability-features mode: {availability_features}")
         if not availability_mask and availability_features != "actual":
-            raise ValueError("zeros/ones availability features require availability_mask=True")
+            raise ValueError("Non-actual availability features require availability_mask=True")
         if diagnose_mlp and (self.encoder_type != "mlp" or self.predictive_loss != "mi"
                              or self.predictive_space != "latent" or self.deterministic):
             raise ValueError("diagnose_mlp requires a stochastic MLP with latent-space MI prediction")
@@ -750,8 +750,8 @@ class CPIC(nn.Module):
                 # One mask is shared by every window in this minibatch,
                 # constant across time, and identical for past/future.
                 #
-                # When availability_mask=True, append the binary neuron
-                # availability vector as extra input features:
+                # When availability_mask=True, append the selected neuron
+                # availability features:
                 #
                 #   [masked neural activity, availability mask]
                 #
