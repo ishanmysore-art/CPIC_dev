@@ -146,6 +146,46 @@ def block_bootstrap_r2(decoder, Z_test, Y_test, decoding_window=1, offset=0,
             "n_blocks": len(blocks), "block_bins": int(block_bins)}
 
 
+def fit_procrustes(Z_from, Z_to):
+    """Orthogonal Q and means such that (Z_from - mu_from) @ Q + mu_to best matches Z_to."""
+    mu_from, mu_to = Z_from.mean(axis=0), Z_to.mean(axis=0)
+    U, _, Vt = np.linalg.svd((Z_from - mu_from).T @ (Z_to - mu_to))
+    return {"Q": U @ Vt, "mu_from": mu_from, "mu_to": mu_to}
+
+
+def apply_procrustes(Z, fit):
+    return (Z - fit["mu_from"]) @ fit["Q"] + fit["mu_to"]
+
+
+def linear_cka(A, B):
+    A, B = A - A.mean(axis=0), B - B.mean(axis=0)
+    cross = np.linalg.norm(A.T @ B) ** 2
+    return float(cross / (np.linalg.norm(A.T @ A) * np.linalg.norm(B.T @ B)))
+
+
+def latent_agreement(Z_hat_train, Z_ref_train, Z_hat_test, Z_ref_test):
+    """
+    How well latents Z_hat match reference latents Z_ref at the same time points, in three
+    explicitly different senses (R² is variance-weighted over latent dimensions):
+
+        direct_r2      no alignment; meaningful only when coordinates are shared by
+                       construction (e.g. a read-in trained into a frozen source critic)
+        linear_r2      least-squares map fit on train, scored on test (alignment-dependent)
+        procrustes_r2  orthogonal map + offset fit on train, scored on test
+        cka            linear CKA on test (invariant to rotation and isotropic scale)
+    """
+    procrustes = fit_procrustes(Z_hat_train, Z_ref_train)
+    linear = LR().fit(Z_hat_train, Z_ref_train)
+    weighting = "variance_weighted"
+    return {
+        "direct_r2": float(r2_score(Z_ref_test, Z_hat_test, multioutput=weighting)),
+        "linear_r2": float(r2_score(Z_ref_test, linear.predict(Z_hat_test), multioutput=weighting)),
+        "procrustes_r2": float(r2_score(Z_ref_test, apply_procrustes(Z_hat_test, procrustes),
+                                        multioutput=weighting)),
+        "cka": linear_cka(Z_hat_test, Z_ref_test),
+    }
+
+
 def probe_suite(Z_fit, Y_fit, Z_eval, Y_eval, offsets=(5, 10, 15), decoding_window=3):
     """
     Fit one linear decoder per offset on (Z_fit, Y_fit) and score it on (Z_eval, Y_eval).
