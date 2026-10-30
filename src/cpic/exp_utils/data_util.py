@@ -172,6 +172,123 @@ def load_sabes_data(filename, bin_width_s=.05, preprocess=True):
         return result
 
 
+def _read_sabes_chan_names(f):
+    return [f[f['chan_names'][0, i]][()].tobytes()[::2].decode()
+            for i in range(f['chan_names'].shape[1])]
+
+
+def _read_sabes_spike_times(f, unit_row, chan_idx):
+    """Spike times for one cell of the MATLAB ``spikes`` array, or None if the cell is empty."""
+    spike_times = f[f["spikes"][unit_row, chan_idx]][()]
+    if spike_times.shape == (2,):  # MATLAB stores an empty cell as a length-2 placeholder
+        return None
+    return spike_times.reshape(-1)
+
+
+def load_sabes_session(filename, bin_width_s=.05, region="M1", representation="unit",
+                       legacy_indexing=False):
+    """
+    Bin one Sabes session into raw spike counts while keeping column identities.
+
+    Unlike ``load_sabes_data``, no filtering, square-root, drift removal or behavioral
+    standardization is applied here: every learned or data-dependent statistic must be
+    fit on a training split (see ``cpic.exp_utils.sessions``).
+
+    Parameters
+    ----------
+    filename : str
+        Path to a Sabes ``.mat`` (v7.3 / HDF5) session file.
+    bin_width_s : float
+        Bin width in seconds.
+    region : str
+        Channel-name prefix to keep ("M1" or "S1").
+    representation : str
+        "unit": one column per non-empty sorted-unit cell (rows 1..u-1 of ``spikes``; row 0
+        is the unsorted hash). Columns have no cross-session correspondence.
+        "electrode": one column per channel of ``region``, summing every row including hash,
+        i.e. all threshold crossings. Columns correspond to physical electrodes, not neurons.
+    legacy_indexing : bool
+        With representation="unit", reproduce ``load_sabes_data``'s unit selection, which
+        visits rows 1..u-2 and never the last sorted-unit row.
+
+    Returns
+    -------
+    dict with
+        counts : (n_bins, n_cols) int64 spike counts
+        channel : (n_cols,) global channel index of each column
+        unit : (n_cols,) row of ``spikes`` (-1 for electrode columns)
+        chan_names : list of all channel names in the file
+        t_mid : (n_bins,) bin centers in seconds relative to the first sample
+        cursor_pos, target_pos, finger_pos : kinematics interpolated at bin centers, raw units
+        bin_width_s, duration_s, n_spikes_outside, n_spike_rows : bookkeeping
+    """
+    if representation not in ("unit", "electrode"):
+        raise ValueError(f"Unknown representation: {representation!r}")
+    if legacy_indexing and representation != "unit":
+        raise ValueError("legacy_indexing only applies to representation='unit'")
+    with h5py.File(filename, "r") as f:
+        chan_names = _read_sabes_chan_names(f)
+        chan_indices = [i for i, name in enumerate(chan_names) if name.split(" ")[0] == region]
+        if len(chan_indices) == 0:
+            raise ValueError(f"No {region} channels in {filename}")
+        t = f['t'][0, :]
+        n_rows = f["spikes"].shape[0]
+        n_bins = int(np.floor((t[-1] - t[0]) / bin_width_s))
+        if representation == "electrode":
+            unit_rows = range(0, n_rows)
+        elif legacy_indexing:
+            unit_rows = range(1, n_rows - 1)
+        else:
+            unit_rows = range(1, n_rows)
+
+        columns, channel, unit = [], [], []
+        n_spikes_outside = 0
+        for chan_idx in chan_indices:
+            electrode_counts = np.zeros(n_bins, dtype=np.int64)
+            for unit_row in unit_rows:
+                spike_times = _read_sabes_spike_times(f, unit_row, chan_idx)
+                if spike_times is None:
+                    continue
+                rel = spike_times - t[0]
+                inside = (rel >= 0) & (rel < n_bins * bin_width_s)
+                n_spikes_outside += int((~inside).sum())
+                bin_counts = np.bincount(np.floor(rel[inside] / bin_width_s).astype(np.int64),
+                                         minlength=n_bins)
+                if representation == "electrode":
+                    electrode_counts += bin_counts
+                else:
+                    columns.append(bin_counts)
+                    channel.append(chan_idx)
+                    unit.append(unit_row)
+            if representation == "electrode":
+                columns.append(electrode_counts)
+                channel.append(chan_idx)
+                unit.append(-1)
+
+        t_mid = np.arange(n_bins) * bin_width_s + bin_width_s / 2
+        kinematics = {}
+        for key in ("cursor_pos", "target_pos", "finger_pos"):
+            if key in f:
+                kinematics[key] = interp1d(t - t[0], f[key][:].T, axis=0)(t_mid)
+
+    counts = (np.stack(columns, axis=1) if columns
+              else np.zeros((n_bins, 0), dtype=np.int64))
+    return {
+        "counts": counts,
+        "channel": np.asarray(channel, dtype=np.int64),
+        "unit": np.asarray(unit, dtype=np.int64),
+        "chan_names": chan_names,
+        "t_mid": t_mid,
+        "bin_width_s": float(bin_width_s),
+        "duration_s": float(t[-1] - t[0]),
+        "n_spikes_outside": n_spikes_outside,
+        "n_spike_rows": int(n_rows),
+        "representation": representation,
+        "legacy_indexing": bool(legacy_indexing),
+        **kinematics,
+    }
+
+
 def load_accel_data(filename, preprocess=True):
     df = pd.read_csv(filename)
     X = df.values[:, 1:]
