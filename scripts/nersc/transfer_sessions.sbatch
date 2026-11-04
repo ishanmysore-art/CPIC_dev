@@ -16,8 +16,10 @@
 # 3 seeds each (tasks 0-2: first target, 3-5: second).
 # Submit with: mkdir -p ~/CPIC_dev/logs && sbatch scripts/nersc/transfer_sessions.sbatch
 # Summarize:   PYTHONPATH=src uv run python experiments/cross_session/transfer_sessions.py --summarize results/transfer_sessions
+# Dropout-trained source variant: sbatch --export=ALL,SOURCE_DROPOUT=0.25 scripts/nersc/transfer_sessions.sbatch
 
 export UV_CACHE_DIR=$SCRATCH/uv-cache
+SOURCE_DROPOUT=${SOURCE_DROPOUT:-0}
 cd /global/homes/i/imysore/CPIC_dev
 
 DATA=$SCRATCH/cpic-data/real_data/M1
@@ -29,4 +31,4 @@ seed=$(( id % 3 ))
 env PYTHONPATH=src \
 uv run python experiments/cross_session/transfer_sessions.py \
   --source "$DATA/indy_20160627_01.mat" --target "$DATA/$target.mat" \
-  --seed "$seed" --device cuda --out results/transfer_sessions
+  --seed "$seed" --source-dropout "$SOURCE_DROPOUT" --device cuda --out results/transfer_sessions

@@ -54,15 +54,22 @@ def make_cpic(xdim, device, cfg=BENCHMARK):
     ).to(device)
 
 
-def fit_standard(X_train, device, seed, cfg=BENCHMARK, use_dca=True, verbose=False):
-    """The standard single-population CPIC recipe (DCA init, CPIC.fit, fixed epochs)."""
+def fit_standard(X_train, device, seed, cfg=BENCHMARK, use_dca=True, verbose=False,
+                 neuron_dropout_p=0.0):
+    """
+    The standard single-population CPIC recipe (DCA init, CPIC.fit, fixed epochs).
+
+    ``neuron_dropout_p`` > 0 zero-fills a random subset of input columns per minibatch
+    (whole neurons/electrodes, shared by past and future windows), seeded by ``seed``.
+    """
     seed_everything(seed)
     init_weights = (DCA_init(X_train, T=cfg["T"], d=cfg["ydim"], n_init=cfg["n_init_dca"])
                     if use_dca else None)
     model = make_cpic(X_train.shape[1], device, cfg)
     model.fit(PastFutureDataset([X_train], window_size=cfg["T"]), init_weights=init_weights,
               epochs=cfg["epochs"], batch_size=cfg["batch_size"], lr=cfg["lr"],
-              early_stop=cfg["epochs"] + 1, verbose=verbose)
+              early_stop=cfg["epochs"] + 1, verbose=verbose,
+              neuron_dropout_p=neuron_dropout_p, neuron_dropout_seed=seed)
     return model
 
 

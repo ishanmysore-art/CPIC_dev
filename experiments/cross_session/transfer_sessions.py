@@ -100,8 +100,13 @@ def relative_change(model, init_state):
     return float(torch.linalg.norm(W - W0) / torch.linalg.norm(W0))
 
 
-def run_pair(session_a, session_b, device, seed, cfg=BENCHMARK, use_dca=True):
-    """All Gate 3 arms for one (source, target) electrode-space session pair and seed."""
+def run_pair(session_a, session_b, device, seed, cfg=BENCHMARK, use_dca=True, source_dropout=0.0):
+    """
+    All Gate 3 arms for one (source, target) electrode-space session pair and seed.
+
+    ``source_dropout`` > 0 trains the SOURCE model with zero-filled whole-electrode
+    dropout, to ask whether masking-style training helps with real session change.
+    """
     names_a = [session_a["chan_names"][c] for c in session_a["channel"]]
     names_b = [session_b["chan_names"][c] for c in session_b["channel"]]
     if names_a != names_b:
@@ -130,7 +135,8 @@ def run_pair(session_a, session_b, device, seed, cfg=BENCHMARK, use_dca=True):
     X_b_shuffled_train = circular_shuffle(X_b["train"], rng)
 
     t0 = time.perf_counter()
-    source = fit_standard(X_a["train"], device, seed, cfg, use_dca=use_dca)
+    source = fit_standard(X_a["train"], device, seed, cfg, use_dca=use_dca,
+                          neuron_dropout_p=source_dropout)
     source_fit_s = time.perf_counter() - t0
     Z_a = {s: encode(source, X_a[s]) for s in SEGMENTS}
     decoders = fit_source_decoders(Z_a["train"], {k: v["train"] for k, v in targets_a.items()})
@@ -175,6 +181,7 @@ def run_pair(session_a, session_b, device, seed, cfg=BENCHMARK, use_dca=True):
 
     return {
         "seed": int(seed), "device": str(device), "cfg": cfg, "arms": arms, "timings": timings,
+        "source_dropout": float(source_dropout),
         "source": {"refit_probe": refit_probes(Z_a, targets_a),
                    "bound_test": heldout_bounds(source, X_a["test"], cfg["batch_size"],
                                                 seed=seed)["I_predictive_mean"]},
@@ -193,14 +200,16 @@ def run(args):
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     target_name = Path(args.target).stem
-    path = out_dir / f"transfer_{Path(args.source).stem}_to_{target_name}_seed{args.seed}.json"
+    dropout_tag = f"_srcdrop{int(round(args.source_dropout * 100)):03d}" if args.source_dropout else ""
+    path = out_dir / f"transfer_{Path(args.source).stem}_to_{target_name}{dropout_tag}_seed{args.seed}.json"
     if path.exists():
         raise FileExistsError(f"Result already exists: {path}")
     t0 = time.perf_counter()
     session_a = load_sabes_session(args.source, bin_width_s=BIN_WIDTH_S, representation="electrode")
     session_b = load_sabes_session(args.target, bin_width_s=BIN_WIDTH_S, representation="electrode")
     load_s = time.perf_counter() - t0
-    result = run_pair(session_a, session_b, device, args.seed, use_dca=not args.no_dca)
+    result = run_pair(session_a, session_b, device, args.seed, use_dca=not args.no_dca,
+                      source_dropout=args.source_dropout)
     result.update({"source_session": Path(args.source).stem, "target_session": target_name})
     result["timings"]["load_s"] = load_s
     with open(path, "x") as f:
@@ -216,12 +225,14 @@ def summarize(results_dir):
     if not runs:
         print(f"No transfer results in {results_dir}")
         return
-    sessions = sorted({r["target_session"] for r in runs})
+    keys = sorted({(r["target_session"], r.get("source_dropout", 0.0)) for r in runs})
+    sessions = sorted({k[0] for k in keys})
     gate_signs = {}
-    for target in sessions:
-        group = [r for r in runs if r["target_session"] == target]
+    for target, source_dropout in keys:
+        group = [r for r in runs if (r["target_session"], r.get("source_dropout", 0.0)) == (target, source_dropout)]
         conv = group[0]["behavior_conventions"]
-        print(f"\n## {group[0]['source_session']} -> {target}  ({len(group)} seeds)")
+        print(f"\n## {group[0]['source_session']} -> {target} | source electrode dropout "
+              f"{source_dropout:g}  ({len(group)} seeds)")
         print(f"electrodes: {group[0]['n_electrodes']} | cursor train mean source "
               f"{np.round(conv['source']['cursor_train_mean'], 1).tolist()} vs target "
               f"{np.round(conv['target']['cursor_train_mean'], 1).tolist()}; std source "
@@ -248,7 +259,8 @@ def summarize(results_dir):
                 g = paired_gaps(group, metric, "refine_pretrained", control, lambda r: r["seed"])
                 ci = f"95% t-CI {g['ci95'][0]:+.4f}, {g['ci95'][1]:+.4f}" if g["ci95"] else "n=1"
                 print(f"Δ frozen R² {target_metric}: refine_pretrained − {control}: {g['mean']:+.4f} ({ci}; n={g['n']})")
-                if target_metric == PRIMARY and control in ("refine_random", "refine_fresh"):
+                if (target_metric == PRIMARY and control in ("refine_random", "refine_fresh")
+                        and source_dropout == 0.0):  # the pre-registered gate uses the plain source
                     gate_signs.setdefault(control, []).append(g["mean"] > 0)
     passed = all(all(signs) for signs in gate_signs.values()) and len(gate_signs) == 2
     print(f"\nPre-registered Gate 3 reading ({len(sessions)} target sessions): "
@@ -261,6 +273,8 @@ def main():
     parser.add_argument("--target", default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-dca", action="store_true", help="Debug only: skip DCA initialization")
+    parser.add_argument("--source-dropout", type=float, default=0.0,
+                        help="Train the source with this zero-filled whole-electrode dropout rate")
     parser.add_argument("--out", default=str(REPO_ROOT / "results" / "transfer_sessions"))
     parser.add_argument("--device", default="auto")
     parser.add_argument("--summarize", metavar="RESULTS_DIR", default=None)

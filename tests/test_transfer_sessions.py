@@ -45,6 +45,12 @@ class TransferSessionsSmokeTest(unittest.TestCase):
                              name.startswith("refine") or name.startswith("permuted_init"))
         self.assertEqual(result["n_electrodes"]["silent_in_target_train"], 1)
 
+    def test_dropout_trained_source(self):
+        result = transfer_sessions.run_pair(fake_electrode_session(0), fake_electrode_session(1),
+                                            "cpu", 0, TINY, use_dca=False, source_dropout=0.25)
+        self.assertEqual(result["source_dropout"], 0.25)
+        self.assertIn("refine_pretrained", result["arms"])
+
     def test_mismatched_channels_raise(self):
         b = fake_electrode_session(1)
         b["chan_names"] = list(reversed(b["chan_names"]))
