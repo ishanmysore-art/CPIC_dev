@@ -9,6 +9,7 @@ import torch
 
 from cpic.multisession import (
     BENCHMARK, fit_readin, fit_standard, population_partitions, random_critic_like,
+    transformed_encoder_state,
 )
 
 TINY = dict(BENCHMARK, ydim=2, T=2, hidden_dim=8, batch_size=64, epochs=2)
@@ -74,6 +75,26 @@ class ReadinArmTests(unittest.TestCase):
         self.assertTrue(torch.equal(rng_before, torch.get_rng_state()))
         self.assertTrue(same(state(a), state(b)))
         self.assertFalse(same(state(a), state(random_critic_like(self.source.critic, 6))))
+
+    def test_transformed_encoder_state(self):
+        enc = self.source.encoder
+        W, b = enc._mean.weight.detach(), enc._mean.bias.detach()
+        V = enc._logvars.weight.detach()
+        perm = np.array([4, 0, 3, 1, 2])
+        G = np.array([[0.0, -1.0], [1.0, 0.0]])
+        state = transformed_encoder_state(enc, rotation=G, permutation=perm)
+        Gt, index = torch.as_tensor(G, dtype=W.dtype), torch.as_tensor(perm)
+        self.assertTrue(torch.allclose(state["_mean.weight"], Gt @ W[:, index]))
+        self.assertTrue(torch.allclose(state["_mean.bias"], Gt @ b))
+        self.assertTrue(torch.equal(state["_logvars.weight"], V[:, index]))
+        self.assertTrue(torch.equal(enc._mean.weight.detach(), W), "source encoder untouched")
+
+    def test_init_encoder_state_is_used_by_every_arm(self):
+        state = transformed_encoder_state(self.source.encoder)
+        for arm in ("pretrained", "random", "fresh"):
+            model, _ = fit_readin(self.X1, "cpu", 3, arm, self.source.critic, TINY, epochs=0,
+                                  init_encoder_state=state)
+            self.assertTrue(same(state, model.encoder.state_dict()))
 
     def test_bad_arm_arguments(self):
         with self.assertRaises(ValueError):

@@ -85,6 +85,30 @@ def random_critic_like(critic, seed):
     return fresh
 
 
+def transformed_encoder_state(encoder, rotation=None, permutation=None):
+    """
+    State dict of a linear ``StructuredEncoder`` with its input columns reassigned and/or
+    its latent axes rotated, for initializing a read-in near (or deliberately away from)
+    the source coordinates.
+
+    permutation : column j of the new read-in gets the source weights of column
+        permutation[j] (e.g. a wrong electrode correspondence). Applied to both heads.
+    rotation : d x d matrix G; the mean head becomes G W (bias G b). The log-variance head
+        is left in its original axes.
+    """
+    state = {k: v.detach().clone() for k, v in encoder.state_dict().items()}
+    if permutation is not None:
+        index = torch.as_tensor(np.asarray(permutation), dtype=torch.long)
+        for key in ("_mean.weight", "_logvars.weight"):
+            state[key] = state[key][:, index.to(state[key].device)]
+    if rotation is not None:
+        G = torch.as_tensor(np.asarray(rotation), dtype=state["_mean.weight"].dtype,
+                            device=state["_mean.weight"].device)
+        state["_mean.weight"] = G @ state["_mean.weight"]
+        state["_mean.bias"] = G @ state["_mean.bias"]
+    return state
+
+
 def latent_moments(Z):
     """Per-bin latent mean and covariance, e.g. of the source population's training latents."""
     Z = np.asarray(Z, dtype=np.float64)
@@ -92,7 +116,7 @@ def latent_moments(Z):
 
 
 def fit_readin(X_train, device, seed, critic_arm, source_critic=None, cfg=BENCHMARK,
-               epochs=None, moment_match=0.0, source_moments=None):
+               epochs=None, moment_match=0.0, source_moments=None, init_encoder_state=None):
     """
     Train a new linear read-in for one population against a pretrained, random or fresh critic.
 
@@ -105,6 +129,9 @@ def fit_readin(X_train, device, seed, critic_arm, source_critic=None, cfg=BENCHM
     moment_match : float
         Optional weight on matching batch latent mean/covariance to ``source_moments``
         (neural-only; 0 disables it).
+    init_encoder_state : dict, optional
+        Read-in initialization (e.g. from ``transformed_encoder_state``) used in place of
+        the random one; the same state should be passed to every arm being compared.
 
     Returns
     -------
@@ -123,6 +150,8 @@ def fit_readin(X_train, device, seed, critic_arm, source_critic=None, cfg=BENCHM
     # Same seed -> identical read-in initialization in every arm.
     seed_everything(seed)
     model = make_cpic(X_train.shape[1], device, cfg)
+    if init_encoder_state is not None:
+        model.encoder.load_state_dict(init_encoder_state)
     if critic_arm == "pretrained":
         model.critic = freeze(copy.deepcopy(source_critic)).to(device)
     elif critic_arm == "random":

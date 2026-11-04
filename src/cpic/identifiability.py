@@ -72,6 +72,19 @@ def plane_rotation(U, theta):
     return np.eye(U.shape[0]) - U @ U.T + U @ R @ U.T
 
 
+def rotation_by_angle(d, angle_deg, rng):
+    """
+    Rotate every plane of a random orthonormal basis by ``angle_deg``, so that
+    ||G - I||_F / sqrt(d) = sqrt(2 (1 - cos angle)) (for even d). A Haar-random rotation
+    sits near the 90 degree value of sqrt(2).
+    """
+    basis = haar_orthogonal(d, rng)
+    G = np.eye(d)
+    for k in range(d // 2):
+        G = plane_rotation(basis[:, 2 * k:2 * k + 2], np.deg2rad(angle_deg)) @ G
+    return G
+
+
 def oscillatory_planes(Z_train, n_planes):
     """
     Orthonormal bases of the oscillatory planes of a least-squares linear model
@@ -119,12 +132,7 @@ def transformation_suite(Z_train, rng, n_draws=3, angles_deg=(5, 10, 20, 45, 90)
             u = rng.normal(size=d)
             add("translation", c, draw, np.eye(d), c * std * u / np.linalg.norm(u))
         for angle in angles_deg:
-            theta = np.deg2rad(angle)
-            basis = haar_orthogonal(d, rng)
-            G = np.eye(d)
-            for k in range(d // 2):  # rotate every plane of a random orthonormal basis
-                G = plane_rotation(basis[:, 2 * k:2 * k + 2], theta) @ G
-            add("rotation_global", angle, draw, G)
+            add("rotation_global", angle, draw, rotation_by_angle(d, angle, rng))
     for scale in (0.5, 0.8, 1.25, 2.0):
         add("scale_isotropic", scale, 0, scale * np.eye(d))
     for n_planes in (1, 3):
@@ -191,18 +199,21 @@ def objective_sensitivity(model, X, Z_train, critic=None, batch_size=512, seed=0
 
 
 def recover_linear_map(model, Z_train, Z_eval, critic=None, parametrization="orthogonal",
-                       seed=0, steps=500, lr=1e-2, batch_size=512):
+                       seed=0, steps=500, lr=1e-2, batch_size=512, init_angle_deg=None):
     """
     Self-recovery (I2): learn z -> z G^T + b on the model's own latents by maximizing the
-    frozen-critic bound, starting from a Haar-random rotation. The correct answer is G = I.
+    frozen-critic bound, starting from a rotation away from the correct answer G = I.
 
-    parametrization="orthogonal" keeps G a rotation (G = expm(S - S^T) G0), which asks only
-    whether the critic pins down orientation; "linear" lets G (and b) be any matrix.
+    The start is Haar-random by default, or ``init_angle_deg`` away from the identity in
+    every plane of a random basis (the basin-radius test). parametrization="orthogonal"
+    keeps G a rotation (G = expm(S - S^T) G0), which asks only whether the critic pins down
+    orientation; "linear" lets G (and b) be any matrix.
     """
     critic = model.critic if critic is None else critic
     T, d, device = model.T, model.ydim, model.device
     rng = np.random.default_rng(seed)
-    G0 = torch.as_tensor(haar_orthogonal(d, rng), dtype=torch.float32, device=device)
+    start = haar_orthogonal(d, rng) if init_angle_deg is None else rotation_by_angle(d, init_angle_deg, rng)
+    G0 = torch.as_tensor(start, dtype=torch.float32, device=device)
     Z = torch.as_tensor(Z_train, dtype=torch.float32, device=device)
     S = torch.zeros(d, d, device=device, requires_grad=True)
     W = G0.clone().requires_grad_(True)
@@ -248,6 +259,7 @@ def recover_linear_map(model, Z_train, Z_eval, critic=None, parametrization="ort
     residual = ((Z_mapped - Z_eval) ** 2).sum() / ((Z_eval - Z_eval.mean(axis=0)) ** 2).sum()
     singular = np.linalg.svd(G, compute_uv=False)
     return {"G": G, "b": bias, "parametrization": parametrization, "seed": int(seed),
+            "init_angle_deg": None if init_angle_deg is None else float(init_angle_deg),
             "distance_from_identity": float(np.linalg.norm(G - np.eye(d)) / np.sqrt(d)),
             "initial_distance_from_identity": float(
                 np.linalg.norm(G0.cpu().numpy() - np.eye(d)) / np.sqrt(d)),

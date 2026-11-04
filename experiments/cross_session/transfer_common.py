@@ -79,10 +79,12 @@ def readouts(model, X_tgt, Z_src, decoders, targets_tgt, source_critic, cfg, see
 
 
 def run_transfer(source, X_src, X_tgt, Y_src, Y_tgt, device, seed, cfg, bin_width_s,
-                 simultaneous, use_dca=True, arms=CRITIC_ARMS, upper_reference=True):
+                 simultaneous, use_dca=True, arms=CRITIC_ARMS, upper_reference=True,
+                 init_encoder_state=None):
     """
     Train a target read-in in each critic arm, plus (optionally) a target-specific CPIC with
     the standard recipe, and compute every readout against the frozen source model.
+    ``init_encoder_state`` (shared by all arms) replaces the random read-in initialization.
     """
     Z_src = {split: encode(source, X_src[split]) for split in ("train", "test")}
     targets_src = behavior_targets(Y_src, bin_width_s)
@@ -100,7 +102,8 @@ def run_transfer(source, X_src, X_tgt, Y_src, Y_tgt, device, seed, cfg, bin_widt
     }
     for arm in arms:
         model, history = fit_readin(X_tgt["train"], device, seed, arm,
-                                    source_critic=source.critic, cfg=cfg)
+                                    source_critic=source.critic, cfg=cfg,
+                                    init_encoder_state=init_encoder_state)
         result["arms"][arm] = {"history": history, **readouts(
             model, X_tgt, Z_src, decoders, targets_tgt, source.critic, cfg, seed, simultaneous)}
     if upper_reference:

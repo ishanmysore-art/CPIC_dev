@@ -9,7 +9,7 @@ from torch import nn
 from cpic.evaluation import encode, heldout_bounds, latent_agreement
 from cpic.identifiability import (
     critic_bound_under_transform, haar_orthogonal, invariance_profile, objective_sensitivity,
-    plane_rotation, recover_linear_map, transformation_suite,
+    plane_rotation, recover_linear_map, rotation_by_angle, transformation_suite,
 )
 from cpic.multisession import BENCHMARK, make_cpic
 
@@ -46,6 +46,22 @@ class IdentifiabilityTests(unittest.TestCase):
                 np.testing.assert_allclose(t["G"] @ t["G"].T, np.eye(4), atol=1e-10)
         U = haar_orthogonal(4, np.random.default_rng(2))[:, :2]
         np.testing.assert_allclose(plane_rotation(U, 0.0), np.eye(4), atol=1e-12)
+
+    def test_rotation_by_angle_has_the_stated_distance(self):
+        rng = np.random.default_rng(3)
+        for angle in (0, 5, 45, 90):
+            G = rotation_by_angle(4, angle, rng)
+            np.testing.assert_allclose(G @ G.T, np.eye(4), atol=1e-12)
+            expected = np.sqrt(2 * (1 - np.cos(np.deg2rad(angle))))
+            self.assertAlmostEqual(np.linalg.norm(G - np.eye(4)) / 2.0, expected, places=10)
+
+    def test_recovery_from_a_controlled_start(self):
+        rec = recover_linear_map(self.model, self.Z, self.Z, steps=1, batch_size=64, init_angle_deg=0)
+        self.assertEqual(rec["init_angle_deg"], 0.0)
+        self.assertAlmostEqual(rec["initial_distance_from_identity"], 0.0, places=6)
+        rec = recover_linear_map(self.model, self.Z, self.Z, steps=1, batch_size=64, init_angle_deg=45)
+        self.assertAlmostEqual(rec["initial_distance_from_identity"],
+                               np.sqrt(2 * (1 - np.cos(np.pi / 4))), places=5)
 
     def test_rotation_blind_critic_shows_orthogonal_invariance(self):
         rows = invariance_profile(self.model, self.X, self.Z, critic=NormCritic(), batch_size=64)
