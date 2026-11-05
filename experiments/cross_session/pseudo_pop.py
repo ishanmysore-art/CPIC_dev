@@ -156,7 +156,9 @@ def direct_agreement(arm):
 
 def summarize(results_dir):
     results_dir = Path(results_dir)
-    runs = [json.loads(p.read_text()) for p in sorted(results_dir.glob("pseudo_*.json"))]
+    # "arms" excludes pseudo_pop_summary.json, which this function itself writes into the same folder.
+    runs = [r for r in (json.loads(p.read_text()) for p in sorted(results_dir.glob("pseudo_*.json")))
+            if "arms" in r]
     if not runs:
         print(f"No pseudo-population results in {results_dir}")
         return

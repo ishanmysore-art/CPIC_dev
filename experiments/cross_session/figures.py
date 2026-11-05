@@ -10,6 +10,7 @@ Figures whose results do not exist yet are skipped with a message.
 
 import argparse
 import json
+import textwrap
 from pathlib import Path
 
 import matplotlib
@@ -41,8 +42,10 @@ plt.rcParams.update({
 })
 
 
-def load(pattern_dir, pattern):
-    return [json.loads(p.read_text()) for p in sorted(Path(pattern_dir).glob(pattern))]
+def load(pattern_dir, pattern, require="seed"):
+    """Result files only: summary files (e.g. pseudo_pop_summary.json) lack ``require``."""
+    runs = [json.loads(p.read_text()) for p in sorted(Path(pattern_dir).glob(pattern))]
+    return [r for r in runs if isinstance(r, dict) and require in r]
 
 
 def mean_sd(values):
@@ -50,13 +53,29 @@ def mean_sd(values):
     return v.mean(), (v.std(ddof=1) if len(v) > 1 else 0.0)
 
 
-def bar_labels(ax, bars, values, fmt="{:+.2f}", clip=None):
-    """Value labels on every bar (two series colors are below 3:1 contrast on the surface)."""
-    for bar, value in zip(bars, values):
-        y = bar.get_height() if clip is None else max(bar.get_height(), clip)
-        ax.annotate(fmt.format(value), (bar.get_x() + bar.get_width() / 2, y),
-                    xytext=(0, 3 if y >= 0 else -11), textcoords="offset points",
+def bar_labels(ax, bars, values, fmt="{:+.2f}", clip=None, errors=None):
+    """
+    Value labels beyond the end of each bar's error bar, so they never sit on the whisker
+    (two series colors are below 3:1 contrast on the surface, so values must be printed).
+    """
+    errors = [0.0] * len(values) if errors is None else errors
+    for bar, value, err in zip(bars, values, errors):
+        end = value + err if value >= 0 else value - err
+        y = end if clip is None else max(end, clip)
+        clipped = clip is not None and value < clip
+        ax.annotate(fmt.format(value) + (" ▼" if clipped else ""), (bar.get_x() + bar.get_width() / 2, y),
+                    xytext=(0, 3 if value >= 0 else -11), textcoords="offset points",
                     ha="center", fontsize=8, color=INK_2)
+
+
+def wrap(label, width=12):
+    return "\n".join(textwrap.wrap(label, width)) or label
+
+
+def legend_in_headroom(ax, ncol, top):
+    """Raise the y-limit to ``top`` and put a one-row legend in the empty band above the data."""
+    ax.set_ylim(top=top)
+    ax.legend(loc="upper center", ncol=ncol, fontsize=9)
 
 
 class Figures:
@@ -120,19 +139,20 @@ class Figures:
         r2 = [get(r, lambda x: x["probes"]["position"]["r2_mean"]) for r in rungs]
         units = [int(get(r, lambda x: x["n_units"])[0]) for r in rungs]
         n_seeds = len({x["seed"] for x in runs})
-        labels = [f"{RUNG_LABEL[r]}\n{u} units" for r, u in zip(rungs, units)]
+        labels = [f"{wrap(RUNG_LABEL[r], 11)}\n{u} units" for r, u in zip(rungs, units)]
         x = np.arange(len(rungs))
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.6))
         bars = ax1.bar(x, [m for m, _ in test], 0.6, yerr=[s for _, s in test], color=SERIES[0],
                        capsize=3, label="held-out test bound (frozen model)")
-        bar_labels(ax1, bars, [m for m, _ in test], fmt="{:.2f}")
+        bar_labels(ax1, bars, [m for m, _ in test], fmt="{:.2f}", errors=[s for _, s in test])
         ax1.plot(x, [m for m, _ in reported], "o", markersize=8, markerfacecolor=SURFACE,
                  markeredgecolor=SERIES[1], markeredgewidth=2, linestyle="none",
                  label="legacy-reported training bound")
         ax1.set_xticks(x, labels, fontsize=8)
         ax1.set_ylabel("InfoNCE predictive bound (nats)")
         ax1.set_title("Predictive information: reported vs held-out")
-        ax1.legend(loc="lower right")
+        ax1.set_ylim(top=max(m for m, _ in reported) * 1.4)
+        ax1.legend(loc="upper left", fontsize=9)
         # Points, not bars: the differences are small, and bars would need a truncated axis.
         ax2.errorbar(x, [m for m, _ in r2], yerr=[s for _, s in r2], color=SERIES[0], marker="o",
                      markersize=8, capsize=3, linestyle="none")
@@ -172,11 +192,12 @@ class Figures:
                                 for r in group]
                     stats.append(mean_sd([fn(a) for a in arm_runs]))
                 means = [m for m, _ in stats]
+                errors = [s if m > floor else 0 for m, s in stats]
                 bars = ax.bar(np.arange(4), [max(m, floor) for m in means], 0.7,
-                              yerr=[s if m > floor else 0 for m, s in stats], capsize=3, color=SERIES)
-                bar_labels(ax, bars, means, clip=floor)
+                              yerr=errors, capsize=3, color=SERIES)
+                bar_labels(ax, bars, means, clip=floor, errors=errors)
                 ax.axhline(0, color=INK_2, linewidth=0.8)
-                ax.set_ylim(floor - 0.15, 1.1)
+                ax.set_ylim(floor - 0.4, 1.15)  # room below the clip line for the value label
                 ax.set_xticks([])
                 if i == 0:
                     ax.set_title(title)
@@ -192,13 +213,14 @@ class Figures:
                   f"critic (same init, data, steps; neural-only); target-only CPIC = standard recipe on P2. "
                   f"Frozen source decoder = linear decoder fit on P1 latents/behavior, applied unchanged to P2 "
                   f"test latents (the only coordinate-transfer readout). Latent R² compares P2 and P1 latents at "
-                  f"the same test time points, variance-weighted. Bars below {floor} are clipped; the printed value "
-                  f"is the true mean. {n} runs (3 partitions x 3 seeds for overlaps 0/0.5; 3 seeds for 1); "
+                  f"the same test time points, variance-weighted. Bars below {floor} are clipped (▼); the printed "
+                  f"value is the true mean. At overlap 1 the target-only CPIC is the source model itself (same "
+                  f"units, data, seed and initialization), so its 1.00 is a pipeline check, not a result. {n} runs (3 partitions x 3 seeds for overlaps 0/0.5; 3 seeds for 1); "
                   f"{SEED_NOTE} and partitions.")
 
     # -- 4. identifiability ------------------------------------------------------------
     def identifiability_figure(self):
-        runs = load(self.results / "pseudo_pop", "identifiability_*.json")
+        runs = load(self.results / "pseudo_pop", "identifiability_*.json", require="profile")
         if not runs:
             return self.skip("fig4_identifiability", "no identifiability results")
         rows = [(critic, row) for r in runs for critic, rs in r["profile"].items() for row in rs]
@@ -229,7 +251,8 @@ class Figures:
             stats = [delta(critic, f, p) for f, p, _ in families]
             bars = ax2.bar(x + (k - 0.5) * (w + 0.01), [m for m, _ in stats], w,
                            yerr=[s for _, s in stats], capsize=3, color=SERIES[k], label=f"{critic} critic")
-            bar_labels(ax2, bars, [m for m, _ in stats])
+            if critic == "pretrained":  # random-critic values are all ~0; labeling them only collides
+                bar_labels(ax2, bars, [m for m, _ in stats], errors=[s for _, s in stats])
         ax2.set_xticks(x, [label for _, _, label in families], rotation=30, ha="right")
         ax2.set_ylabel("ΔI (nats)")
         ax2.set_title("Other latent maps")
@@ -259,7 +282,8 @@ class Figures:
                    for s in starts]
             ax1.plot(xpos, med, marker="o", markersize=8, color=SERIES[k], label=label)
         ax1.axhline(0.9, color=INK_2, linestyle="--", linewidth=1)
-        ax1.annotate("recovered (pre-registered 0.9)", (2, 0.92), fontsize=8, color=INK_2)
+        ax1.annotate("recovered (pre-registered 0.9)", (2, 0.9), xytext=(0, -12), textcoords="offset points",
+                     fontsize=8, color=INK_2)
         ax1.set_xticks(xpos, [("Haar" if s == "haar" else s) for s in starts])
         ax1.set_ylim(max(-1.5, ax1.get_ylim()[0]), 1.05)
         ax1.set_xlabel("start: rotation away from the correct latents (degrees)")
@@ -276,11 +300,11 @@ class Figures:
                               for x in r["input_level"] if x["start_angle_deg"] == a]) for a in angles]
             ax2.errorbar(angles, [m for m, _ in stats], yerr=[s for _, s in stats], marker="o",
                          markersize=8, color=SERIES[k], label=f"after training: {ARM_LABEL[arm]}", capsize=3)
-        ax2.set_ylim(max(-1.5, ax2.get_ylim()[0]), 1.05)
+        ax2.set_ylim(top=1.05)  # no lower clip: the random-critic arm must stay visible
         ax2.set_xlabel("start: source encoder rotated by (degrees)")
         ax2.set_ylabel("direct latent R² vs source")
         ax2.set_title("Input-level read-in refinement")
-        ax2.legend(loc="lower left", fontsize=8)
+        ax2.legend(loc="best", fontsize=8)
         self.save(fig, "fig5_basin_radius", "is the frozen critic a local refiner?",
                   f"Source CPIC on all units of indy_20160627_01 (corrected pipeline), one per seed. Left: a map "
                   f"on the source's own training latents optimized to maximize the frozen critic's InfoNCE from a "
@@ -310,13 +334,16 @@ class Figures:
                 colors = [SERIES[0] if a == "refine_pretrained" else NEUTRAL for a in arms]
                 ax.barh(y, [max(m, -1.0) for m, _ in stats], 0.65, xerr=[s for _, s in stats],
                         color=colors, capsize=3)
-                for yy, (m, _) in zip(y, stats):
-                    ax.annotate(f"{m:+.2f}", (max(m, -1.0), yy), xytext=(4 if m >= 0 else -30, -3),
-                                textcoords="offset points", fontsize=8, color=INK_2)
-                ceiling = np.mean([r["arms"]["target_specific_cpic"]["refit_probe"][metric]["r2_mean"]
-                                   for r in group])
-                ax.axvline(ceiling, color=SERIES[1], linestyle="--", linewidth=1.2)
-                ax.annotate("B-only refit", (ceiling, y[0] + 0.5), fontsize=8, color=INK_2, ha="center")
+                for yy, (m, s) in zip(y, stats):  # label beyond the whisker
+                    end = max(m + s, -1.0) if m >= 0 else max(m - s, -1.0)
+                    ax.annotate(f"{m:+.2f}", (end, yy), xytext=(4 if m >= 0 else -4, -3),
+                                textcoords="offset points", fontsize=8, color=INK_2,
+                                ha="left" if m >= 0 else "right")
+                reference = np.mean([r["arms"]["target_specific_cpic"]["refit_probe"][metric]["r2_mean"]
+                                     for r in group])
+                ax.axvline(reference, color=SERIES[1], linestyle="--", linewidth=1.2)
+                ax.annotate("B-only CPIC, refit probe", (reference, y[0] + 0.55), fontsize=8,
+                            color=INK_2, ha="left", xytext=(4, 0), textcoords="offset points")
                 ax.axvline(0, color=INK_2, linewidth=0.8)
                 ax.set_xlim(-1.05, 1.0)
                 ax.set_yticks(y, arms, fontsize=8)
@@ -330,9 +357,56 @@ class Figures:
                   f"Bars: A's linear decoder (fit on A latents and A behavior, never refit) applied to B's held-out "
                   f"test latents for each arm; blue = read-in initialized from A's encoder and refined against A's "
                   f"frozen critic on unlabeled B. Position is standardized per session with its own training-split "
-                  f"statistics (evaluation-side). Dashed line: refit probe of a B-only CPIC (upper reference, not "
-                  f"transfer). Bars below -1 clipped; printed values are true means. n = {len({r['seed'] for r in runs})} "
+                  f"statistics (evaluation-side). Dashed line: refit probe of a CPIC trained on B alone, a "
+                  f"reference rather than a ceiling - with a short B session its decoder sees little training "
+                  f"data, so A's decoder (fit on the 56-min session) can exceed it. Bars below -1 clipped; "
+                  f"printed values are true means. n = {len({r['seed'] for r in runs})} "
                   f"seeds per pair; {SEED_NOTE}; seeds measure within-session variability only.")
+
+    # -- 10. distance curve and neural-only predictor ----------------------------------
+    def distance_figure(self):
+        from transfer_sessions import cross_session_table, predictor_tests
+        runs = load(self.results / "transfer_sessions", "transfer_*.json")
+        rows = cross_session_table(runs, self.inventory) if runs else []
+        if len(rows) < 3:
+            return self.skip("fig10_distance", f"need >= 3 target sessions, have {len(rows)}")
+        tests, verdict = predictor_tests(rows)
+        days = np.array([r["days_apart"] for r in rows])
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+        ax = axes[0]
+        for k, (key, label) in enumerate((("zero_shot_r2", "zero-shot"),
+                                          ("refined_r2", "refined vs A's frozen critic"))):
+            ax.plot(days, [r[key] for r in rows], "o", markersize=9, color=SERIES[k], label=label)
+        ax.plot(days, [r["target_only_refit_r2"] for r in rows], "o", markersize=9, markerfacecolor=SURFACE,
+                markeredgecolor=NEUTRAL, markeredgewidth=2, linestyle="none", label="B-only CPIC, refit probe")
+        ax.axhline(0, color=INK_2, linewidth=0.8)
+        ax.set_xlabel("days from source session (indy_20160627_01)")
+        ax.set_ylabel("frozen decoder R² on target (re-std. position)")
+        ax.set_title("Transfer vs time between sessions")
+        ax.legend(loc="lower left", fontsize=8)
+        for ax, (key, xlabel) in zip(axes[1:], (("critic_bound_zero_shot", "zero-shot bound under A's frozen critic (nats)"),
+                                                ("rate_correlation", "electrode firing-rate correlation, A vs B"))):
+            usable = [r for r in rows if r[key] is not None]
+            ax.plot([r[key] for r in usable], [r["zero_shot_r2"] for r in usable], "o", markersize=9,
+                    color=SERIES[0])
+            for r in usable:
+                ax.annotate(f"{r['days_apart']:+d} d", (r[key], r["zero_shot_r2"]), xytext=(5, 3),
+                            textcoords="offset points", fontsize=8, color=INK_2)
+            test = tests.get(f"zero_shot_r2 ~ {key}")
+            stat = f"Spearman ρ = {test['rho']:+.2f}, p = {test['p']:.3f}, n = {test['n_sessions']}" if test else "n < 4"
+            ax.set_title(stat, fontsize=10)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("zero-shot frozen decoder R²")
+            ax.axhline(0, color=INK_2, linewidth=0.8)
+        verdict_text = {None: "not yet computable", True: "supported", False: "not supported"}[verdict]
+        self.save(fig, "fig10_distance", "transfer across sessions and a neural-only predictor",
+                  f"Source indy_20160627_01 -> {len(rows)} Indy target sessions, electrode representation, plain "
+                  f"(non-dropout) source; every point is a session mean over seeds (seeds averaged first; sessions "
+                  f"are the unit of analysis). R² = A's frozen decoder on the target's held-out test latents "
+                  f"(re-standardized position). Predictors use no behavior: the zero-shot InfoNCE bound of target "
+                  f"test latents under A's frozen critic (mean latents), and the Pearson correlation of training-"
+                  f"split firing rates on A's kept electrodes. Spearman p-values from 20,000 permutations. "
+                  f"Pre-registered test (critic bound beats both controls, rho > 0, p < 0.05): {verdict_text}.")
 
     # -- 7. synthetic ------------------------------------------------------------------
     def synthetic_figure(self):
@@ -341,24 +415,26 @@ class Figures:
             return self.skip("fig7_synthetic", "no synthetic results")
         fig, ax = plt.subplots(figsize=(8, 4))
         x, w = np.arange(len(ARM_ORDER)), 0.38
+        lowest = 0.0
         for k, (key, label) in enumerate((("direct_r2", "direct latent R² (no alignment)"),
                                           ("procrustes_r2", "Procrustes latent R² (rotation fit)"))):
             stats = [mean_sd([(r["target_specific_cpic"] if a == "target_specific_cpic" else r["arms"][a])
                               ["agreement"][key] for r in runs]) for a in ARM_ORDER]
-            bars = ax.bar(x + (k - 0.5) * (w + 0.01), [max(m, -1.0) for m, _ in stats], w,
+            bars = ax.bar(x + (k - 0.5) * (w + 0.01), [m for m, _ in stats], w,
                           yerr=[s for _, s in stats], capsize=3, color=SERIES[k], label=label)
-            bar_labels(ax, bars, [m for m, _ in stats], clip=-1.0)
+            bar_labels(ax, bars, [m for m, _ in stats], errors=[s for _, s in stats])
+            lowest = min([lowest] + [m - s for m, s in stats])
         ax.axhline(0, color=INK_2, linewidth=0.8)
-        ax.set_ylim(-1.15, 1.1)
-        ax.set_xticks(x, [ARM_LABEL[a] for a in ARM_ORDER])
+        ax.set_ylim(bottom=lowest - 0.3)  # unclipped, with room for the label under the lowest whisker
+        ax.set_xticks(x, [wrap(ARM_LABEL[a], 16) for a in ARM_ORDER])
         ax.set_ylabel("R² vs source latents (test)")
         ax.set_title("Synthetic two-population check (shared Lorenz latent)")
-        ax.legend(loc="lower left")
+        legend_in_headroom(ax, ncol=2, top=1.5)
         self.save(fig, "fig7_synthetic", "synthetic sanity check",
                   f"Two 30-unit populations observe one 3-D Lorenz trajectory through different random linear "
                   f"loadings plus independent unit-variance noise; CPIC (ydim 3, T 4) trained on population 1, "
                   f"population-2 read-ins trained per arm as in Fig. 3. Chronological 70/10/20 split; latent R² on "
-                  f"test time points. n = {len(runs)} seeds; {SEED_NOTE}. Bars below -1 clipped.")
+                  f"test time points. n = {len(runs)} seeds; {SEED_NOTE}.")
 
     # -- 8. objective ablation ---------------------------------------------------------
     def ablation_figure(self):
@@ -402,13 +478,14 @@ class Figures:
             ax.annotate(f"{total:.0f} s", (i, total), xytext=(0, 3), textcoords="offset points",
                         ha="center", fontsize=8, color=INK_2)
         peak = np.mean([x["peak_gpu_memory_mb"] for x in runs])
-        ax.set_xticks(np.arange(len(rungs)), [RUNG_LABEL[r] for r in rungs], fontsize=8)
+        ax.set_xticks(np.arange(len(rungs)), [wrap(RUNG_LABEL[r], 11) for r in rungs], fontsize=8)
         ax.set_ylabel("seconds per run (mean over seeds)")
         ax.set_title(f"Where a benchmark run spends its time (peak GPU memory ≈ {peak / 1024:.2f} GB)")
-        ax.legend(loc="upper right")
+        legend_in_headroom(ax, ncol=3, top=bottom.max() * 1.3)
         self.save(fig, "fig9_runtime", "runtime by phase",
                   "Ladder runs on one NERSC Perlmutter A100 (40 GB). Data loading excluded (shared across rungs). "
-                  "Means over seeds; no error bars.")
+                  "DCA initialization (5 restarts) costs about as much as CPIC training itself and was not "
+                  "included in the earlier ~29 s benchmark figure. Means over seeds; no error bars.")
 
     def write_captions(self):
         (self.out / "captions.md").write_text("# Figure captions\n\n" + "\n".join(self.captions))
@@ -424,7 +501,7 @@ def main():
     figs = Figures(args.results, args.inventory, args.out)
     for build in (figs.inventory_figure, figs.ladder_figure, figs.pseudo_population_figure,
                   figs.identifiability_figure, figs.basin_figure, figs.transfer_figure,
-                  figs.synthetic_figure, figs.ablation_figure, figs.runtime_figure):
+                  figs.distance_figure, figs.synthetic_figure, figs.ablation_figure, figs.runtime_figure):
         try:
             build()
         except Exception as error:  # one malformed result set should not block the others

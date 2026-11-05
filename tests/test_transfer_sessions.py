@@ -1,7 +1,9 @@
 """CPU smoke test for Gate 3 electrode-space transfer on two synthetic sessions."""
 
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -56,6 +58,36 @@ class TransferSessionsSmokeTest(unittest.TestCase):
         b["chan_names"] = list(reversed(b["chan_names"]))
         with self.assertRaises(ValueError):
             transfer_sessions.run_pair(fake_electrode_session(0), b, "cpu", 0, TINY, use_dca=False)
+
+    def test_cross_session_table_and_predictor_tests(self):
+        base = transfer_sessions.run_pair(fake_electrode_session(0), fake_electrode_session(1),
+                                          "cpu", 0, TINY, use_dca=False)
+        runs = []
+        for k, target in enumerate(["indy_20160624_03", "indy_20160630_01", "indy_20160915_01",
+                                    "indy_20161006_02", "indy_20161212_02"]):
+            run = json.loads(json.dumps(base))
+            run.update({"source_session": "indy_20160627_01", "target_session": target})
+            run["arms"]["zero_shot_target_norm"]["bound_source_critic_test_mean_latent"] = 2.0 - k
+            run["arms"]["zero_shot_target_norm"]["frozen_source_decoder"]["position_restandardized"]["r2_mean"] = 0.3 - 0.1 * k
+            runs.append(run)
+        with tempfile.TemporaryDirectory() as tmp:
+            for k, name in enumerate(["indy_20160627_01"] + [r["target_session"] for r in runs]):
+                rates = [1.0, 2.0, 3.0, 4.0, 5.0 + k, 0.1]  # last electrode below the 0.5 Hz cut
+                Path(tmp, f"electrode_rates_{name}.json").write_text(json.dumps(
+                    {"chan_names": [f"M1 {i + 1:03d}" for i in range(6)], "train_rate_hz": rates}))
+            rows = transfer_sessions.cross_session_table(runs, tmp)
+        self.assertEqual([r["days_apart"] for r in rows], [-3, 3, 80, 101, 168])
+        self.assertTrue(all(r["rate_correlation"] is not None for r in rows))
+        tests, verdict = transfer_sessions.predictor_tests(rows)
+        self.assertAlmostEqual(tests["zero_shot_r2 ~ critic_bound_zero_shot"]["rho"], 1.0)
+        self.assertIn(verdict, (True, False))
+
+    def test_permutation_spearman(self):
+        rho, p = transfer_sessions.permutation_spearman([1, 2, 3, 4, 5, 6, 7, 8], [2, 4, 6, 8, 10, 12, 14, 16])
+        self.assertAlmostEqual(rho, 1.0)
+        self.assertLess(p, 0.001)  # exact two-sided p for n=8 is 2/40320
+        rho, p = transfer_sessions.permutation_spearman([1, 2, 3, 4, 5], [3, 1, 4, 1, 5], seed=1)
+        self.assertGreater(p, 0.05)
 
     def test_circular_shuffle_keeps_marginals(self):
         X = np.random.default_rng(0).normal(size=(500, 3))

@@ -44,10 +44,12 @@ variability only; with 2 sessions any cross-session statement is descriptive.
 import argparse
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.stats import rankdata
 
 from cpic.evaluation import cursor_velocity, encode, heldout_bounds
 from cpic.exp_utils.data_util import load_sabes_session
@@ -220,7 +222,114 @@ def run(args):
         + f" -> {path}", flush=True)
 
 
-def summarize(results_dir):
+def session_date(name):
+    return datetime.strptime(name.split("_")[1], "%Y%m%d").date()
+
+
+def rate_correlation(rates_dir, source, target):
+    """Pearson correlation of training-split electrode rates on the source's kept electrodes."""
+    paths = [Path(rates_dir) / f"electrode_rates_{s}.json" for s in (source, target)]
+    if rates_dir is None or not all(p.exists() for p in paths):
+        return None
+    a, b = (json.loads(p.read_text()) for p in paths)
+    if a["chan_names"] != b["chan_names"]:
+        raise ValueError(f"Electrode order differs between {source} and {target}")
+    ra, rb = np.asarray(a["train_rate_hz"]), np.asarray(b["train_rate_hz"])
+    keep = ra >= MIN_RATE_HZ
+    return float(np.corrcoef(ra[keep], rb[keep])[0, 1])
+
+
+def cross_session_table(runs, rates_dir=None):
+    """One row per target session (plain source only), seed means of every quantity."""
+    plain = [r for r in runs if r.get("source_dropout", 0.0) == 0.0]
+    rows = []
+    for target in sorted({r["target_session"] for r in plain}):
+        group = [r for r in plain if r["target_session"] == target]
+        source = group[0]["source_session"]
+
+        def mean(arm, fn):
+            return float(np.mean([fn(r["arms"][arm]) for r in group]))
+        frozen = lambda a: a["frozen_source_decoder"][PRIMARY]["r2_mean"]
+        rows.append({
+            "target": target, "n_seeds": len(group),
+            "days_apart": (session_date(target) - session_date(source)).days,
+            "target_duration_min": group[0]["behavior_conventions"]["target"]["duration_s"] / 60,
+            "silent_electrodes": group[0]["n_electrodes"]["silent_in_target_train"],
+            "critic_bound_zero_shot": mean("zero_shot_target_norm",
+                                           lambda a: a["bound_source_critic_test_mean_latent"]),
+            "rate_correlation": rate_correlation(rates_dir, source, target),
+            "zero_shot_r2": mean("zero_shot_target_norm", frozen),
+            "refined_r2": mean("refine_pretrained", frozen),
+            "fresh_r2": mean("refine_fresh", frozen),
+            "target_only_refit_r2": mean("target_specific_cpic",
+                                         lambda a: a["refit_probe"][PRIMARY]["r2_mean"]),
+        })
+    return rows
+
+
+def permutation_spearman(x, y, n_perm=20000, seed=0):
+    """Spearman rho with a two-sided permutation p-value (exact enough for ~8 sessions)."""
+    rx, ry = rankdata(x), rankdata(y)
+    rho = float(np.corrcoef(rx, ry)[0, 1])
+    rng = np.random.default_rng(seed)
+    perms = np.argsort(rng.random((n_perm, len(ry))), axis=1)
+    shuffled = ry[perms]
+    rxc = rx - rx.mean()
+    null = (shuffled - shuffled.mean(axis=1, keepdims=True)) @ rxc
+    null /= np.linalg.norm(rxc) * np.linalg.norm(shuffled - shuffled.mean(axis=1, keepdims=True), axis=1)
+    p = (1 + np.sum(np.abs(null) >= abs(rho) - 1e-12)) / (n_perm + 1)
+    return rho, float(p)
+
+
+def predictor_tests(rows):
+    """
+    Pre-registered (Nov 4): does the zero-shot bound under A's frozen critic predict zero-shot
+    frozen-decoder R² across sessions better than neural-only controls (electrode-rate
+    correlation, -|days apart|)? Supported if rho > 0, p < 0.05, and |rho| beats both controls.
+    """
+    predictors = {"critic_bound_zero_shot": lambda r: r["critic_bound_zero_shot"],
+                  "rate_correlation": lambda r: r["rate_correlation"],
+                  "neg_abs_days": lambda r: -abs(r["days_apart"])}
+    tests = {}
+    for outcome in ("zero_shot_r2", "refined_r2"):
+        for name, fn in predictors.items():
+            usable = [r for r in rows if fn(r) is not None]
+            if len(usable) < 4:
+                continue
+            rho, p = permutation_spearman([fn(r) for r in usable], [r[outcome] for r in usable])
+            tests[f"{outcome} ~ {name}"] = {"rho": rho, "p": p, "n_sessions": len(usable)}
+    primary = tests.get("zero_shot_r2 ~ critic_bound_zero_shot")
+    controls = [tests.get(f"zero_shot_r2 ~ {c}") for c in ("rate_correlation", "neg_abs_days")]
+    verdict = None
+    if primary and all(controls):
+        verdict = bool(primary["rho"] > 0 and primary["p"] < 0.05
+                       and all(abs(primary["rho"]) > abs(c["rho"]) for c in controls))
+    return tests, verdict
+
+
+def summarize_sessions(results_dir, runs, rates_dir):
+    rows = cross_session_table(runs, rates_dir)
+    if not rows:
+        return
+    print(f"\n## Across target sessions (plain source; seed means; {PRIMARY} for R²)")
+    print("| target | days | min | silent el. | critic bound (zero-shot) | rate corr | zero-shot R² "
+          "| refined R² | fresh R² | B-only refit R² |\n|---|---|---|---|---|---|---|---|---|---|")
+    for r in sorted(rows, key=lambda r: r["days_apart"]):
+        rc = "n/a" if r["rate_correlation"] is None else f"{r['rate_correlation']:+.3f}"
+        print(f"| {r['target']} | {r['days_apart']:+d} | {r['target_duration_min']:.1f} | "
+              f"{r['silent_electrodes']} | {r['critic_bound_zero_shot']:+.3f} | {rc} | "
+              f"{r['zero_shot_r2']:+.3f} | {r['refined_r2']:+.3f} | {r['fresh_r2']:+.3f} | "
+              f"{r['target_only_refit_r2']:+.3f} |")
+    tests, verdict = predictor_tests(rows)
+    for name, t in tests.items():
+        print(f"Spearman {name}: rho {t['rho']:+.3f}, permutation p {t['p']:.4f} (n={t['n_sessions']} sessions)")
+    print("Pre-registered predictor test: " + ("not computable yet (need >= 4 sessions with every predictor)"
+                                              if verdict is None else ("SUPPORTED" if verdict else "NOT SUPPORTED")))
+    (Path(results_dir) / "distance_summary.json").write_text(
+        json.dumps({"rows": rows, "tests": tests, "verdict": verdict}, indent=1))
+
+
+def summarize(results_dir, rates_dir=None):
     runs = [json.loads(p.read_text()) for p in sorted(Path(results_dir).glob("transfer_*.json"))]
     if not runs:
         print(f"No transfer results in {results_dir}")
@@ -265,6 +374,7 @@ def summarize(results_dir):
     passed = all(all(signs) for signs in gate_signs.values()) and len(gate_signs) == 2
     print(f"\nPre-registered Gate 3 reading ({len(sessions)} target sessions): "
           f"{'PASS' if passed else 'FAIL'} {json.dumps({k: v for k, v in gate_signs.items()})}")
+    summarize_sessions(results_dir, runs, rates_dir)
 
 
 def main():
@@ -278,9 +388,11 @@ def main():
     parser.add_argument("--out", default=str(REPO_ROOT / "results" / "transfer_sessions"))
     parser.add_argument("--device", default="auto")
     parser.add_argument("--summarize", metavar="RESULTS_DIR", default=None)
+    parser.add_argument("--rates-dir", default=str(REPO_ROOT / "inventory"),
+                        help="electrode_rates_*.json for the firing-rate-similarity control predictor")
     args = parser.parse_args()
     if args.summarize:
-        summarize(args.summarize)
+        summarize(args.summarize, args.rates_dir)
     elif args.target is None:
         parser.error("--target is required unless --summarize is given")
     else:
