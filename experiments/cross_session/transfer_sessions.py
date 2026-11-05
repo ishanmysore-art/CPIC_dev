@@ -268,8 +268,14 @@ def cross_session_table(runs, rates_dir=None):
 
 
 def permutation_spearman(x, y, n_perm=20000, seed=0):
-    """Spearman rho with a two-sided permutation p-value (exact enough for ~8 sessions)."""
+    """
+    Spearman rho with a two-sided permutation p-value (exact enough for ~8 sessions).
+    Returns (nan, nan) when either input is constant: rho is undefined there, and a NaN rho
+    would otherwise yield a spuriously tiny p.
+    """
     rx, ry = rankdata(x), rankdata(y)
+    if np.ptp(rx) == 0 or np.ptp(ry) == 0:
+        return float("nan"), float("nan")
     rho = float(np.corrcoef(rx, ry)[0, 1])
     rng = np.random.default_rng(seed)
     perms = np.argsort(rng.random((n_perm, len(ry))), axis=1)
@@ -301,7 +307,7 @@ def predictor_tests(rows):
     primary = tests.get("zero_shot_r2 ~ critic_bound_zero_shot")
     controls = [tests.get(f"zero_shot_r2 ~ {c}") for c in ("rate_correlation", "neg_abs_days")]
     verdict = None
-    if primary and all(controls):
+    if primary and all(controls) and all(np.isfinite(t["rho"]) for t in [primary] + controls):
         verdict = bool(primary["rho"] > 0 and primary["p"] < 0.05
                        and all(abs(primary["rho"]) > abs(c["rho"]) for c in controls))
     return tests, verdict

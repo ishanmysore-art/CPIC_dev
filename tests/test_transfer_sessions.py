@@ -88,6 +88,8 @@ class TransferSessionsSmokeTest(unittest.TestCase):
         self.assertLess(p, 0.001)  # exact two-sided p for n=8 is 2/40320
         rho, p = transfer_sessions.permutation_spearman([1, 2, 3, 4, 5], [3, 1, 4, 1, 5], seed=1)
         self.assertGreater(p, 0.05)
+        rho, p = transfer_sessions.permutation_spearman([1, 2, 3, 4, 5], [0.2] * 5)
+        self.assertTrue(np.isnan(rho) and np.isnan(p), "constant input must not look significant")
 
     def test_circular_shuffle_keeps_marginals(self):
         X = np.random.default_rng(0).normal(size=(500, 3))
