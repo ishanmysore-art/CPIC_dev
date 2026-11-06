@@ -316,9 +316,54 @@ class Figures:
 
     # -- 6. cross-session transfer -----------------------------------------------------
     def transfer_figure(self):
-        runs = load(self.results / "transfer_sessions", "transfer_*.json")
+        """Compact slide figure: the four key arms across every target session (plain source)."""
+        from transfer_sessions import PRIMARY, session_date
+        runs = [r for r in load(self.results / "transfer_sessions", "transfer_*.json")
+                if r.get("source_dropout", 0.0) == 0.0]
         if not runs:
             return self.skip("fig6_transfer", "no transfer results")
+        targets = sorted({r["target_session"] for r in runs}, key=session_date)
+        source = session_date(runs[0]["source_session"])
+        arms = [("zero_shot_target_norm", "zero-shot", "o"),
+                ("refine_pretrained", "refined: pretrained critic", "s"),
+                ("refine_fresh", "refined: fresh critic", "D"),
+                ("refine_pretrained_shuffled", "refined: pretrained critic, time-shuffled B", "^")]
+        fig, ax = plt.subplots(figsize=(13, 5.2))
+        x = np.arange(len(targets))
+        dodge = np.linspace(-0.27, 0.27, len(arms))
+        highest = 0.0
+        for k, (arm, label, marker) in enumerate(arms):  # marker shape is a second encoding beside color
+            stats = [mean_sd([r["arms"][arm]["frozen_source_decoder"][PRIMARY]["r2_mean"]
+                              for r in runs if r["target_session"] == t]) for t in targets]
+            ax.errorbar(x + dodge[k], [m for m, _ in stats], yerr=[s for _, s in stats], fmt=marker,
+                        markersize=8, color=SERIES[k], capsize=2, label=label)
+            highest = max(highest, max(m + s for m, s in stats))
+        refit = [np.mean([r["arms"]["target_specific_cpic"]["refit_probe"][PRIMARY]["r2_mean"]
+                          for r in runs if r["target_session"] == t]) for t in targets]
+        ax.plot(x, refit, "_", markersize=28, markeredgewidth=2.5, color=NEUTRAL,
+                label="decoder refit on B alone (reference)")
+        ax.axhline(0, color=INK_2, linewidth=0.8)
+        dates = [session_date(t) for t in targets]
+        ax.set_xticks(x, [f"{d:%b} {d.day}, {d.year}\n{(d - source).days:+d} days" for d in dates], fontsize=9)
+        ax.set_ylabel("A's frozen decoder R² on B\n(re-standardized cursor position)")
+        ax.set_title("Electrode-anchored transfer from indy_20160627_01 to 8 later and earlier sessions")
+        legend_in_headroom(ax, ncol=3, top=max(highest, max(refit)) + 0.17)
+        self.save(fig, "fig6_transfer", "cross-session transfer in electrode space",
+                  f"Source indy_20160627_01 -> {len(targets)} Indy sessions, electrode representation (threshold "
+                  f"crossings per channel; physical, not cellular, correspondence), plain (non-dropout) source. "
+                  f"Points: A's linear decoder (fit on A latents and A behavior, never refit) applied to each "
+                  f"target's held-out test latents. Zero-shot = A's frozen model; refined = read-in initialized "
+                  f"from A's encoder and trained on unlabeled B against A's frozen critic (pretrained), a fresh "
+                  f"jointly trained critic, or A's critic on B with every electrode independently circularly "
+                  f"shifted. Position standardized per session with its own training-split statistics "
+                  f"(evaluation-side). Grey bars: decoder refit on a CPIC trained on B alone, a reference rather "
+                  f"than a ceiling. Mean ± 1 SD over 3 seeds per session; all arms in fig6b_transfer_detail.")
+
+    # -- 6b. per-session detail (appendix) ----------------------------------------------
+    def transfer_detail_figure(self):
+        runs = load(self.results / "transfer_sessions", "transfer_*.json")
+        if not runs:
+            return self.skip("fig6b_transfer_detail", "no transfer results")
         keys = sorted({(r["target_session"], r.get("source_dropout", 0.0)) for r in runs})
         arms = list(runs[0]["arms"])
         fig, axes = plt.subplots(len(keys), 2, figsize=(13, 0.45 * len(arms) * len(keys) + 1.2),
@@ -351,7 +396,7 @@ class Figures:
                 ax.set_title(f"{target}, source dropout {dropout:g}: {title}", fontsize=10)
         for ax in axes[-1]:
             ax.set_xlabel("R² of session A's frozen decoder on session B (test)")
-        self.save(fig, "fig6_transfer", "cross-session transfer in electrode space",
+        self.save(fig, "fig6b_transfer_detail", "cross-session transfer, every arm (appendix)",
                   f"Source indy_20160627_01 -> targets {', '.join(sorted({k[0] for k in keys}))}; electrode "
                   f"representation (threshold crossings per channel; physical, not cellular, correspondence). "
                   f"Bars: A's linear decoder (fit on A latents and A behavior, never refit) applied to B's held-out "
@@ -372,31 +417,46 @@ class Figures:
             return self.skip("fig10_distance", f"need >= 3 target sessions, have {len(rows)}")
         tests, verdict = predictor_tests(rows)
         days = np.array([r["days_apart"] for r in rows])
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+        fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.8))
+        fig.subplots_adjust(wspace=0.3)
         ax = axes[0]
-        for k, (key, label) in enumerate((("zero_shot_r2", "zero-shot"),
-                                          ("refined_r2", "refined vs A's frozen critic"))):
-            ax.plot(days, [r[key] for r in rows], "o", markersize=9, color=SERIES[k], label=label)
+        # Small horizontal offsets (in days) keep the three sessions within a week of A from overlapping.
+        for k, (key, label, shift) in enumerate((("zero_shot_r2", "zero-shot", -3),
+                                                 ("refined_r2", "refined vs A's frozen critic", 3))):
+            ax.plot(days + shift, [r[key] for r in rows], "o", markersize=9, color=SERIES[k], label=label)
         ax.plot(days, [r["target_only_refit_r2"] for r in rows], "o", markersize=9, markerfacecolor=SURFACE,
-                markeredgecolor=NEUTRAL, markeredgewidth=2, linestyle="none", label="B-only CPIC, refit probe")
+                markeredgecolor=NEUTRAL, markeredgewidth=2, linestyle="none", label="decoder refit on B alone")
         ax.axhline(0, color=INK_2, linewidth=0.8)
         ax.set_xlabel("days from source session (indy_20160627_01)")
         ax.set_ylabel("frozen decoder R² on target (re-std. position)")
         ax.set_title("Transfer vs time between sessions")
-        ax.legend(loc="lower left", fontsize=8)
-        for ax, (key, xlabel) in zip(axes[1:], (("critic_bound_zero_shot", "zero-shot bound under A's frozen critic (nats)"),
-                                                ("rate_correlation", "electrode firing-rate correlation, A vs B"))):
+        ax.set_ylim(top=max(r["target_only_refit_r2"] for r in rows) + 0.15)
+        ax.legend(loc="upper left", fontsize=8)
+        zero_shot = [r["zero_shot_r2"] for r in rows]
+        for i, (ax, (key, xlabel)) in enumerate(zip(axes[1:], (
+                ("critic_bound_zero_shot", "zero-shot bound under A's frozen critic (nats)"),
+                ("rate_correlation", "electrode firing-rate correlation, A vs B")))):
             usable = [r for r in rows if r[key] is not None]
-            ax.plot([r[key] for r in usable], [r["zero_shot_r2"] for r in usable], "o", markersize=9,
-                    color=SERIES[0])
-            for r in usable:
-                ax.annotate(f"{r['days_apart']:+d} d", (r[key], r["zero_shot_r2"]), xytext=(5, 3),
-                            textcoords="offset points", fontsize=8, color=INK_2)
+            xs = [r[key] for r in usable]
+            ax.plot(xs, [r["zero_shot_r2"] for r in usable], "o", markersize=9, color=SERIES[0])
+            span = (max(xs) - min(xs)) or 1.0
+            placed = []
+            for r in sorted(usable, key=lambda r: -r["zero_shot_r2"]):  # stack labels of nearby points
+                px, py = r[key], r["zero_shot_r2"]
+                near = sum(abs(qx - px) < 0.2 * span and abs(qy - py) < 0.03 for qx, qy in placed)
+                ax.annotate(f"{r['days_apart']:+d} d", (px, py), xytext=(14, 3 - 13 * near),
+                            textcoords="offset points", fontsize=8, color=INK_2, va="center",
+                            # a leader line ties a label pushed down by its neighbours to its own point
+                            arrowprops=dict(arrowstyle="-", color=NEUTRAL, lw=0.7) if near else None)
+                placed.append((px, py))
+            ax.set_xlim(min(xs) - 0.06 * span, max(xs) + 0.22 * span)
+            ax.set_ylim(min(zero_shot) - 0.05, max(zero_shot) + 0.06)
             test = tests.get(f"zero_shot_r2 ~ {key}")
             stat = f"Spearman ρ = {test['rho']:+.2f}, p = {test['p']:.3f}, n = {test['n_sessions']}" if test else "n < 4"
             ax.set_title(stat, fontsize=10)
             ax.set_xlabel(xlabel)
-            ax.set_ylabel("zero-shot frozen decoder R²")
+            if i == 0:
+                ax.set_ylabel("zero-shot frozen decoder R²")
             ax.axhline(0, color=INK_2, linewidth=0.8)
         verdict_text = {None: "not yet computable", True: "supported", False: "not supported"}[verdict]
         self.save(fig, "fig10_distance", "transfer across sessions and a neural-only predictor",
@@ -501,6 +561,7 @@ def main():
     figs = Figures(args.results, args.inventory, args.out)
     for build in (figs.inventory_figure, figs.ladder_figure, figs.pseudo_population_figure,
                   figs.identifiability_figure, figs.basin_figure, figs.transfer_figure,
+                  figs.transfer_detail_figure,
                   figs.distance_figure, figs.synthetic_figure, figs.ablation_figure, figs.runtime_figure):
         try:
             build()
